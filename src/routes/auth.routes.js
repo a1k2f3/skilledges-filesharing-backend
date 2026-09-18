@@ -1,5 +1,5 @@
 const express = require("express");
-const { login } = require("../controllers/auth.controller");
+const { createTestAdmin, login } = require("../controllers/auth.controller");
 
 const router = express.Router();
 
@@ -11,5 +11,6 @@ router.get("/test", (req, res) => {
 });
 
 router.post("/login", login);
+router.post("/test-admin", createTestAdmin);
 
 module.exports = router;

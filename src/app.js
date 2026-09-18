@@ -5,6 +5,8 @@ const rateLimit = require("express-rate-limit");
 const authRoutes = require("./routes/auth.routes");
 const teamRoutes = require("./routes/team.routes");
 const userRoutes = require("./routes/user.routes");
+const fileRoutes = require("./routes/file.routes");
+const shareRoutes = require("./routes/share.routes");
 const errorHandler = require("./middleware/error.middleware");
 
 const app = express();
@@ -34,6 +36,8 @@ app.get("/api/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/teams", teamRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/files", fileRoutes);
+app.use("/api/shares", shareRoutes);
 
 app.use(errorHandler);
 
