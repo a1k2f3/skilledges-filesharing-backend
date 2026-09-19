@@ -7,7 +7,7 @@ const { uploadFile, listFiles, deleteFile } = require("../controllers/file.contr
 const router = express.Router();
 
 router.use(authenticate);
-router.post("/upload", upload.single("file"), uploadFile);
+router.post("/upload", upload.array("file"), uploadFile);
 router.get("/", listFiles);
 router.delete("/:fileId", loadFile, requireFileOwner, deleteFile);
 

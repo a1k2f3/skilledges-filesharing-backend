@@ -1,18 +1,15 @@
 const mongoose = require("mongoose");
 const Team = require("../schema/Team");
 const User = require("../schema/User");
-
 const createTeam = async (req, res, next) => {
   try {
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
-
     if (!name) {
       return res.status(400).json({
         success: false,
         message: "Team name is required"
       });
     }
-
     const team = await Team.create({
       name,
       owner: req.user.id,
