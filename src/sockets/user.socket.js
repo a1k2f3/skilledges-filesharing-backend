@@ -10,7 +10,6 @@ const registerUserSocket = (io) => {
 				if (!user) {
 					return callback?.({ success: false, message: "User not found" });
 				}
-
 				const payload = {
 					userId: user._id.toString(),
 					name: user.name,
