@@ -1,14 +1,12 @@
 const { Server } = require("socket.io");
 const { verifyToken } = require("../utils/jwt");
+const { corsOptions } = require("./cors");
 
 let io;
 
 const initializeSocket = (server) => {
   io = new Server(server, {
-    cors: {
-      origin: process.env.CLIENT_URL,
-      credentials: true
-    }
+    cors: corsOptions
   });
 
   io.use((socket, next) => {

@@ -103,7 +103,53 @@ const login = async (req, res, next) => {
 	}
 };
 
+const signup = async (req, res, next) => {
+	try {
+		const { name, email, password } = req.body;
+		const normalizedName = typeof name === "string" ? name.trim() : "";
+		const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+
+		if (!normalizedName || !normalizedEmail || typeof password !== "string") {
+			return res.status(400).json({
+				success: false,
+				message: "Name, email, and password are required"
+			});
+		}
+
+		if (normalizedName.length < 2 || normalizedName.length > 100 || password.length < 6) {
+			return res.status(400).json({
+				success: false,
+				message: "Name must be 2-100 characters and password must be at least 6 characters"
+			});
+		}
+
+		if (await User.findOne({ email: normalizedEmail })) {
+			return res.status(409).json({ success: false, message: "A user with this email already exists" });
+		}
+
+		const isFirstUser = (await User.countDocuments()) === 0;
+		const user = await User.create({
+			name: normalizedName,
+			email: normalizedEmail,
+			password: await hashPassword(password),
+			role: isFirstUser ? "admin" : "user"
+		});
+		const token = generateToken({ id: user._id.toString(), role: user.role });
+		const responseUser = user.toObject();
+		delete responseUser.password;
+
+		return res.status(201).json({ success: true, token, data: responseUser });
+	} catch (error) {
+		if (error.code === 11000) {
+			return res.status(409).json({ success: false, message: "A user with this email already exists" });
+		}
+
+		next(error);
+	}
+};
+
 module.exports = {
 	createTestAdmin,
-	login
+	login,
+	signup
 };

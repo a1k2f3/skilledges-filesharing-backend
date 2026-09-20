@@ -18,7 +18,6 @@ const registerAuthSocket = (io) => {
 				role: socket.user.role
 			}
 		});
-
 		socket.on("auth:me", async (callback) => {
 			try {
 				const user = await User.findById(socket.user.id).select("name email role isActive lastSeen");

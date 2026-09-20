@@ -1,5 +1,5 @@
 const express = require("express");
-const { createTestAdmin, login } = require("../controllers/auth.controller");
+const { createTestAdmin, login, signup } = require("../controllers/auth.controller");
 
 const router = express.Router();
 
@@ -11,6 +11,7 @@ router.get("/test", (req, res) => {
 });
 
 router.post("/login", login);
+router.post("/signup", signup);
 router.post("/test-admin", createTestAdmin);
 
 module.exports = router;
