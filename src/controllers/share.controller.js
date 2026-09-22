@@ -1,5 +1,6 @@
 const FileShare = require("../schema/FileShare");
 const User = require("../schema/User");
+const Team = require("../schema/Team");
 const { getIO } = require("../config/socket");
 const { FILE_SHARED, FILE_SHARE_REVOKED } = require("../constants/events");
 const { createNotification } = require("./notification.controller");
@@ -63,6 +64,36 @@ const listReceivedShares = async (req, res, next) => {
 	}
 };
 
+const shareFileWithTeam = async (req, res, next) => {
+	try {
+		const team = await Team.findById(req.params.teamId).populate("members", "name email isActive");
+		if (!team) return res.status(404).json({ success: false, message: "Team not found" });
+
+		const members = team.members.filter((member) => member.isActive && member._id.toString() !== req.user.id);
+		const existingShares = await FileShare.find({ file: req.fileRecord._id, sharedWith: { $in: members.map((member) => member._id) } }).select("sharedWith");
+		const existingIds = new Set(existingShares.map((share) => share.sharedWith.toString()));
+		const recipients = members.filter((member) => !existingIds.has(member._id.toString()));
+
+		const shares = await FileShare.insertMany(recipients.map((member) => ({
+			file: req.fileRecord._id,
+			sharedBy: req.user.id,
+			sharedWith: member._id,
+			permission: req.body.permission === "edit" ? "edit" : "view",
+			expiresAt: req.body.expiresAt || null
+		})));
+		await Promise.all(recipients.map((member) => createNotification({
+			recipient: member._id,
+			type: "file-shared",
+			title: "File shared with your team",
+			message: `${req.fileRecord.originalName} was shared with ${team.name}`,
+			data: { fileId: req.fileRecord._id, teamId: team._id }
+		})));
+		return res.status(201).json({ success: true, data: { teamId: team._id, teamName: team.name, sharedCount: shares.length, skippedCount: members.length - recipients.length } });
+	} catch (error) {
+		next(error);
+	}
+};
+
 const revokeShare = async (req, res, next) => {
 	try {
 		const share = await FileShare.findById(req.params.shareId).populate("file", "owner");
@@ -94,4 +125,4 @@ const revokeShare = async (req, res, next) => {
 	}
 };
 
-module.exports = { shareFile, listReceivedShares, revokeShare };
+module.exports = { shareFile, shareFileWithTeam, listReceivedShares, revokeShare };

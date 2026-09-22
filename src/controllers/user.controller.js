@@ -41,7 +41,7 @@ const createUser = async (req, res, next) => {
 			name: normalizedName,
 			email: normalizedEmail,
 			password: await hashPassword(password),
-			role: role === "admin" ? "admin" : "user"
+			role: ["admin", "designer"].includes(role) ? role : "user"
 		});
 
 		const responseUser = user.toObject();
@@ -85,8 +85,11 @@ const getCurrentUser = async (req, res, next) => {
 
 const listUsers = async (req, res, next) => {
 	try {
-		const users = await User.find({ isActive: true })
-			.select("name email role lastSeen createdAt")
+		const filter = { isActive: true };
+		if (req.query.role) filter.role = req.query.role;
+
+		const users = await User.find(filter)
+			.select("name email role isActive lastSeen createdAt")
 			.sort({ name: 1 });
 
 		return res.json({
