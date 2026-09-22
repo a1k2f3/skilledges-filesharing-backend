@@ -1,5 +1,6 @@
 const File = require("../schema/File");
 const FileShare = require("../schema/FileShare");
+const { Readable } = require("stream");
 const { cloudinary, uploadBuffer, getResourceType } = require("../config/cloudinary");
 const { getIO } = require("../config/socket");
 const { FILE_UPLOADED, FILE_DELETED } = require("../constants/events");
@@ -47,8 +48,33 @@ const uploadFile = async (req, res, next) => {
 
 const listFiles = async (req, res, next) => {
 	try {
-		const files = await File.find({ owner: req.user.id }).sort({ createdAt: -1 });
+		const files = await File.find(req.user.role === "admin" ? {} : { owner: req.user.id }).sort({ createdAt: -1 });
 		return res.json({ success: true, count: files.length, data: files });
+	} catch (error) {
+		next(error);
+	}
+};
+
+const downloadFile = async (req, res, next) => {
+	try {
+		const isOwner = req.fileRecord.owner.toString() === req.user.id;
+		const isAdmin = req.user.role === "admin";
+		const hasShare = await FileShare.exists({ file: req.fileRecord._id, sharedWith: req.user.id });
+
+		if (!isOwner && !isAdmin && !hasShare) {
+			return res.status(403).json({ success: false, message: "You do not have access to this file" });
+		}
+
+		const upstream = await fetch(req.fileRecord.secureUrl);
+		if (!upstream.ok || !upstream.body) {
+			return res.status(502).json({ success: false, message: "Unable to retrieve file from storage" });
+		}
+
+		const fallbackName = req.fileRecord.originalName.replace(/[\r\n"\\]/g, "_");
+		res.setHeader("Content-Type", req.fileRecord.mimeType || upstream.headers.get("content-type") || "application/octet-stream");
+		res.setHeader("Content-Disposition", `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodeURIComponent(req.fileRecord.originalName)}`);
+		if (upstream.headers.get("content-length")) res.setHeader("Content-Length", upstream.headers.get("content-length"));
+		return Readable.fromWeb(upstream.body).pipe(res);
 	} catch (error) {
 		next(error);
 	}
@@ -77,4 +103,4 @@ const deleteFile = async (req, res, next) => {
 	}
 };
 
-module.exports = { uploadFile, listFiles, deleteFile };
+module.exports = { uploadFile, listFiles, downloadFile, deleteFile };

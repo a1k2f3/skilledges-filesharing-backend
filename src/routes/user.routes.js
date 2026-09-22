@@ -7,6 +7,7 @@ const {
 	createUser,
 	getCurrentUser,
 	listUsers,
+	listDesigners,
 	getUser,
 	updateUser
 } = require("../controllers/user.controller");
@@ -17,6 +18,7 @@ router.post("/signup", signup);
 router.use(authenticate);
 
 router.get("/me", getCurrentUser);
+router.get("/designers", listDesigners);
 router.post("/", requireRole("admin"), createUser);
 router.get("/", requireRole("admin"), listUsers);
 router.get("/:userId", loadUser, requireUserAccess, getUser);

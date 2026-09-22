@@ -102,6 +102,22 @@ const listUsers = async (req, res, next) => {
 	}
 };
 
+const listDesigners = async (req, res, next) => {
+	try {
+		const designers = await User.find({ role: "designer", isActive: true })
+			.select("name email role isActive lastSeen createdAt")
+			.sort({ name: 1 });
+
+		return res.json({
+			success: true,
+			count: designers.length,
+			data: designers
+		});
+	} catch (error) {
+		next(error);
+	}
+};
+
 const getUser = (req, res) => {
 	return res.json({
 		success: true,
@@ -149,6 +165,7 @@ module.exports = {
 	createUser,
 	getCurrentUser,
 	listUsers,
+	listDesigners,
 	getUser,
 	updateUser
 };

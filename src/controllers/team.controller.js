@@ -26,6 +26,25 @@ const listTeams = async (req, res, next) => {
   }
 };
 
+const listMyTeams = async (req, res, next) => {
+  try {
+    const teams = await populateTeam(Team.find({ members: req.user.id }).sort({ name: 1 }));
+    return res.json({ success: true, count: teams.length, data: teams });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getTeam = async (req, res, next) => {
+  try {
+    const team = await populateTeam(Team.findById(req.params.teamId));
+    if (!team) return res.status(404).json({ success: false, message: "Team not found" });
+    return res.json({ success: true, data: team });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const createTeam = async (req, res, next) => {
   try {
     const name = typeof req.body.name === "string" ? req.body.name.trim() : "";
@@ -167,6 +186,8 @@ const removeMember = async (req, res, next) => {
 
 module.exports = {
   listTeams,
+  listMyTeams,
+  getTeam,
   createTeam,
   updateTeam,
   deleteTeam,

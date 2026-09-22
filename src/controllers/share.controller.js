@@ -70,6 +70,9 @@ const shareFileWithTeam = async (req, res, next) => {
 		if (!team) return res.status(404).json({ success: false, message: "Team not found" });
 
 		const members = team.members.filter((member) => member.isActive && member._id.toString() !== req.user.id);
+		if (!members.length) {
+			return res.status(400).json({ success: false, message: "Add at least one active member to this team before sending a file" });
+		}
 		const existingShares = await FileShare.find({ file: req.fileRecord._id, sharedWith: { $in: members.map((member) => member._id) } }).select("sharedWith");
 		const existingIds = new Set(existingShares.map((share) => share.sharedWith.toString()));
 		const recipients = members.filter((member) => !existingIds.has(member._id.toString()));
@@ -81,6 +84,10 @@ const shareFileWithTeam = async (req, res, next) => {
 			permission: req.body.permission === "edit" ? "edit" : "view",
 			expiresAt: req.body.expiresAt || null
 		})));
+		recipients.forEach((member, index) => {
+			getIO().to(`user:${member._id}`).emit(FILE_SHARED, { share: shares[index], teamId: team._id });
+		});
+		getIO().to(`user:${req.user.id}`).emit(FILE_SHARED, { teamId: team._id, fileId: req.fileRecord._id, sharedCount: shares.length });
 		await Promise.all(recipients.map((member) => createNotification({
 			recipient: member._id,
 			type: "file-shared",
