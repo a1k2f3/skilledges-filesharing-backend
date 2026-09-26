@@ -64,6 +64,19 @@ const listReceivedShares = async (req, res, next) => {
 	}
 };
 
+const listSentShares = async (req, res, next) => {
+	try {
+		const shares = await FileShare.find({ sharedBy: req.user.id })
+			.populate("file", "originalName secureUrl size mimeType format")
+			.populate("sharedWith", "name email role")
+			.sort({ createdAt: -1 });
+
+		return res.json({ success: true, count: shares.length, data: shares });
+	} catch (error) {
+		next(error);
+	}
+};
+
 const shareFileWithTeam = async (req, res, next) => {
 	try {
 		const team = await Team.findById(req.params.teamId).populate("members", "name email isActive");
@@ -132,4 +145,4 @@ const revokeShare = async (req, res, next) => {
 	}
 };
 
-module.exports = { shareFile, shareFileWithTeam, listReceivedShares, revokeShare };
+module.exports = { shareFile, shareFileWithTeam, listReceivedShares, listSentShares, revokeShare };
