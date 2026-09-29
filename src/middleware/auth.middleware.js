@@ -1,6 +1,7 @@
 const { verifyToken } = require("../utils/jwt");
+const User = require("../schema/User");
 
-const authenticate = (req, res, next) => {
+const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -14,6 +15,13 @@ const authenticate = (req, res, next) => {
     const token = authHeader.split(" ")[1];
 
     const decoded = verifyToken(token);
+    const user = await User.findById(decoded.id).select("isActive");
+    if (!user || !user.isActive) {
+      return res.status(401).json({
+        success: false,
+        message: "This account is inactive"
+      });
+    }
 
     req.user = decoded;
 

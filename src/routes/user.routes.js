@@ -9,7 +9,8 @@ const {
 	listUsers,
 	listDesigners,
 	getUser,
-	updateUser
+	updateUser,
+	deactivateDesigner
 } = require("../controllers/user.controller");
 
 const router = express.Router();
@@ -21,6 +22,7 @@ router.get("/me", getCurrentUser);
 router.get("/designers", listDesigners);
 router.post("/", requireRole("admin"), createUser);
 router.get("/", requireRole("admin"), listUsers);
+router.delete("/designers/:designerId", requireRole("admin"), deactivateDesigner);
 router.get("/:userId", loadUser, requireUserAccess, getUser);
 router.patch("/:userId", loadUser, requireUserAccess, updateUser);
 

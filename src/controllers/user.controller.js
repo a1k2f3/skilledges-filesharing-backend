@@ -161,11 +161,27 @@ const updateUser = async (req, res, next) => {
 	}
 };
 
+const deactivateDesigner = async (req, res, next) => {
+	try {
+		const designer = await User.findOne({ _id: req.params.designerId, role: "designer", isActive: true });
+		if (!designer) {
+			return res.status(404).json({ success: false, message: "Active designer not found" });
+		}
+
+		designer.isActive = false;
+		await designer.save();
+		return res.json({ success: true, data: { _id: designer._id, isActive: designer.isActive } });
+	} catch (error) {
+		next(error);
+	}
+};
+
 module.exports = {
 	createUser,
 	getCurrentUser,
 	listUsers,
 	listDesigners,
 	getUser,
-	updateUser
+	updateUser,
+	deactivateDesigner
 };

@@ -105,4 +105,35 @@ const deleteFile = async (req, res, next) => {
 	}
 };
 
-module.exports = { uploadFile, listFiles, downloadFile, deleteFile };
+const deleteFilesBulk = async (req, res, next) => {
+	try {
+		const deleteAll = req.body.deleteAll === true;
+		const fileIds = req.body.fileIds;
+		if (!deleteAll && (!Array.isArray(fileIds) || fileIds.length === 0)) {
+			return res.status(400).json({ success: false, message: "Choose files to delete or confirm deleting all files" });
+		}
+
+		const files = await File.find(deleteAll ? {} : { _id: { $in: fileIds } });
+		const deletedIds = [];
+		let failedCount = 0;
+		for (const file of files) {
+			try {
+				await cloudinary.uploader.destroy(file.publicId, { resource_type: file.resourceType });
+				deletedIds.push(file._id);
+			} catch {
+				failedCount += 1;
+			}
+		}
+
+		if (deletedIds.length) {
+			await FileShare.deleteMany({ file: { $in: deletedIds } });
+			await File.deleteMany({ _id: { $in: deletedIds } });
+		}
+
+		return res.json({ success: true, data: { deletedCount: deletedIds.length, failedCount } });
+	} catch (error) {
+		next(error);
+	}
+};
+
+module.exports = { uploadFile, listFiles, downloadFile, deleteFile, deleteFilesBulk };
