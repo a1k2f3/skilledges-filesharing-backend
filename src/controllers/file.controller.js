@@ -61,8 +61,11 @@ const downloadFile = async (req, res, next) => {
 	try {
 		const isOwner = req.fileRecord.owner.toString() === req.user.id;
 		const isAdmin = req.user.role === "admin";
-		const hasShare = await FileShare.exists({ file: req.fileRecord._id, sharedWith: req.user.id });
-
+		const hasShare = await FileShare.exists({
+			file: req.fileRecord._id,
+			sharedWith: req.user.id,
+			$or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
+		});
 		if (!isOwner && !isAdmin && !hasShare) {
 			return res.status(403).json({ success: false, message: "You do not have access to this file" });
 		}

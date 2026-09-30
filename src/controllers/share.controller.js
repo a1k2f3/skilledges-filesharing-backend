@@ -18,7 +18,10 @@ const shareFile = async (req, res, next) => {
 			return res.status(400).json({ success: false, message: "You cannot share a file with yourself" });
 		}
 
-		const share = await FileShare.create({
+		let share = await FileShare.findOne({ file: req.fileRecord._id, sharedWith: recipient._id });
+		if (share) return res.json({ success: true, data: share });
+
+		share = await FileShare.create({
 			file: req.fileRecord._id,
 			sharedBy: req.user.id,
 			sharedWith: recipient._id,
@@ -44,6 +47,44 @@ const shareFile = async (req, res, next) => {
 		if (error.code === 11000) {
 			return res.status(409).json({ success: false, message: "File is already shared with this user" });
 		}
+		next(error);
+	}
+};
+
+const shareFileWithAdmins = async (req, res, next) => {
+	try {
+		const admins = await User.find({ role: "admin", isActive: true }).select("name email");
+		if (!admins.length) return res.status(404).json({ success: false, message: "No active admin account is available" });
+		const sender = await User.findById(req.user.id).select("name");
+
+		const existingShares = await FileShare.find({
+			file: req.fileRecord._id,
+			sharedWith: { $in: admins.map((admin) => admin._id) }
+		}).select("sharedWith");
+		const existingIds = new Set(existingShares.map((share) => share.sharedWith.toString()));
+		const recipients = admins.filter((admin) => !existingIds.has(admin._id.toString()));
+		if (!recipients.length) {
+			return res.json({ success: true, data: { sharedCount: 0, skippedCount: admins.length } });
+		}
+
+		const shares = await FileShare.insertMany(recipients.map((admin) => ({
+			file: req.fileRecord._id,
+			sharedBy: req.user.id,
+			sharedWith: admin._id,
+			permission: "view"
+		})));
+		recipients.forEach((admin, index) => {
+			getIO().to(`user:${admin._id}`).emit(FILE_SHARED, { share: shares[index] });
+		});
+		await Promise.all(recipients.map((admin, index) => createNotification({
+			recipient: admin._id,
+			type: "file-shared",
+			title: "Designer file received",
+			message: `${req.fileRecord.originalName} was sent by ${sender?.name || "a user"}`,
+			data: { fileId: req.fileRecord._id, shareId: shares[index]._id }
+		})));
+		return res.status(201).json({ success: true, data: { sharedCount: shares.length, skippedCount: existingIds.size } });
+	} catch (error) {
 		next(error);
 	}
 };
@@ -145,4 +186,4 @@ const revokeShare = async (req, res, next) => {
 	}
 };
 
-module.exports = { shareFile, shareFileWithTeam, listReceivedShares, listSentShares, revokeShare };
+module.exports = { shareFile, shareFileWithAdmins, shareFileWithTeam, listReceivedShares, listSentShares, revokeShare };

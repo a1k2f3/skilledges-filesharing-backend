@@ -8,6 +8,7 @@ const userRoutes = require("./routes/user.routes");
 const fileRoutes = require("./routes/file.routes");
 const shareRoutes = require("./routes/share.routes");
 const notificationRoutes = require("./routes/notification.routes");
+const orderRoutes = require("./routes/order.routes");
 const errorHandler = require("./middleware/error.middleware");
 const { corsOptions } = require("./config/cors");
 
@@ -36,6 +37,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/files", fileRoutes);
 app.use("/api/shares", shareRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/orders", orderRoutes);
 
 app.use(errorHandler);
 
