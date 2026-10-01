@@ -1,6 +1,7 @@
 const User = require("../schema/User");
 const { comparePassword, hashPassword } = require("../utils/password");
 const { generateToken } = require("../utils/jwt");
+const { normalizeWhatsappNumber } = require("../utils/whatsapp");
 
 const createTestAdmin = async (req, res, next) => {
 	try {
@@ -12,9 +13,17 @@ const createTestAdmin = async (req, res, next) => {
 			return res.status(401).json({ success: false, message: "Invalid test admin key" });
 		}
 
-		const { name, email, password } = req.body;
+		const { name, email, password, whatsappNumber } = req.body;
 		const normalizedName = typeof name === "string" ? name.trim() : "";
 		const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+		const normalizedWhatsappNumber = typeof whatsappNumber === "string" ? normalizeWhatsappNumber(whatsappNumber) : null;
+
+		if (typeof whatsappNumber === "string" && !normalizedWhatsappNumber) {
+			return res.status(400).json({
+				success: false,
+				message: "WhatsApp number must contain 8 to 15 digits"
+			});
+		}
 
 		if (!normalizedName || !normalizedEmail || typeof password !== "string") {
 			return res.status(400).json({
@@ -38,6 +47,7 @@ const createTestAdmin = async (req, res, next) => {
 		const user = await User.create({
 			name: normalizedName,
 			email: normalizedEmail,
+			whatsappNumber: normalizedWhatsappNumber,
 			password: await hashPassword(password),
 			role: "admin"
 		});
@@ -105,9 +115,17 @@ const login = async (req, res, next) => {
 
 const signup = async (req, res, next) => {
 	try {
-		const { name, email, password } = req.body;
+		const { name, email, password, whatsappNumber } = req.body;
 		const normalizedName = typeof name === "string" ? name.trim() : "";
 		const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+		const normalizedWhatsappNumber = typeof whatsappNumber === "string" ? normalizeWhatsappNumber(whatsappNumber) : null;
+
+		if (typeof whatsappNumber === "string" && !normalizedWhatsappNumber) {
+			return res.status(400).json({
+				success: false,
+				message: "WhatsApp number must contain 8 to 15 digits"
+			});
+		}
 
 		if (!normalizedName || !normalizedEmail || typeof password !== "string") {
 			return res.status(400).json({
@@ -131,6 +149,7 @@ const signup = async (req, res, next) => {
 		const user = await User.create({
 			name: normalizedName,
 			email: normalizedEmail,
+			whatsappNumber: normalizedWhatsappNumber,
 			password: await hashPassword(password),
 			role: isFirstUser ? "admin" : "user"
 		});

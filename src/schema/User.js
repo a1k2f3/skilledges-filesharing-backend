@@ -18,6 +18,20 @@ const userSchema = new mongoose.Schema(
       trim: true
     },
 
+    whatsappNumber: {
+      type: String,
+      default: null,
+      trim: true,
+      validate: {
+        validator(value) {
+          if (!value) return true;
+          const digitsOnly = value.replace(/\D/g, "");
+          return digitsOnly.length >= 8 && digitsOnly.length <= 15;
+        },
+        message: "WhatsApp number must contain 8 to 15 digits"
+      }
+    },
+
     password: {
       type: String,
       required: true,

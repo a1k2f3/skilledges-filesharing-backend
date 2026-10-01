@@ -1,11 +1,20 @@
 const User = require("../schema/User");
 const { hashPassword } = require("../utils/password");
+const { normalizeWhatsappNumber } = require("../utils/whatsapp");
 
 const createUser = async (req, res, next) => {
 	try {
-		const { name, email, password, role } = req.body;
+		const { name, email, password, role, whatsappNumber } = req.body;
 		const normalizedName = typeof name === "string" ? name.trim() : "";
 		const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+		const normalizedWhatsappNumber = typeof whatsappNumber === "string" ? normalizeWhatsappNumber(whatsappNumber) : null;
+
+		if (typeof whatsappNumber === "string" && !normalizedWhatsappNumber) {
+			return res.status(400).json({
+				success: false,
+				message: "WhatsApp number must contain 8 to 15 digits"
+			});
+		}
 
 		if (!normalizedName || !normalizedEmail || typeof password !== "string") {
 			return res.status(400).json({
@@ -40,6 +49,7 @@ const createUser = async (req, res, next) => {
 		const user = await User.create({
 			name: normalizedName,
 			email: normalizedEmail,
+			whatsappNumber: normalizedWhatsappNumber,
 			password: await hashPassword(password),
 			role: ["admin", "designer"].includes(role) ? role : "user"
 		});
@@ -89,7 +99,7 @@ const listUsers = async (req, res, next) => {
 		if (req.query.role) filter.role = req.query.role;
 
 		const users = await User.find(filter)
-			.select("name email role isActive lastSeen createdAt")
+			.select("name email whatsappNumber role isActive lastSeen createdAt")
 			.sort({ name: 1 });
 
 		return res.json({
@@ -105,7 +115,7 @@ const listUsers = async (req, res, next) => {
 const listDesigners = async (req, res, next) => {
 	try {
 		const designers = await User.find({ role: "designer", isActive: true })
-			.select("name email role isActive lastSeen createdAt")
+			.select("name email whatsappNumber role isActive lastSeen createdAt")
 			.sort({ name: 1 });
 
 		return res.json({
@@ -140,6 +150,21 @@ const updateUser = async (req, res, next) => {
 			}
 
 			updates.name = name;
+		}
+
+		if (typeof req.body.whatsappNumber === "string") {
+			const whatsappNumber = normalizeWhatsappNumber(req.body.whatsappNumber);
+			if (!whatsappNumber) {
+				return res.status(400).json({
+					success: false,
+					message: "WhatsApp number must contain 8 to 15 digits"
+				});
+			}
+			updates.whatsappNumber = whatsappNumber;
+		}
+
+		if (req.body.whatsappNumber === null) {
+			updates.whatsappNumber = null;
 		}
 
 		if (Object.keys(updates).length === 0) {
