@@ -1,4 +1,4 @@
-const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:3000,http://127.0.0.1:3000")
+const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:3000,http://127.0.0.1:3000"||"https://skilledges-filesharing-frontend.vercel.app")
 	.split(",")
 	.map((origin) => origin.trim())
 	.filter(Boolean);
