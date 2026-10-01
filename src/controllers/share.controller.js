@@ -4,7 +4,6 @@ const Team = require("../schema/Team");
 const { getIO } = require("../config/socket");
 const { FILE_SHARED, FILE_SHARE_REVOKED } = require("../constants/events");
 const { createNotification } = require("./notification.controller");
-const { sendFileShareWhatsAppMessage } = require("../utils/whatsapp");
 
 const shareFile = async (req, res, next) => {
 	try {
@@ -43,20 +42,6 @@ const shareFile = async (req, res, next) => {
 			message: `${share.file.originalName} was shared with you`,
 			data: { shareId: share._id, fileId: share.file._id }
 		});
-
-		try {
-			if (recipient.whatsappNumber) {
-				await sendFileShareWhatsAppMessage({
-					recipientNumber: recipient.whatsappNumber,
-					recipientName: recipient.name,
-					senderName: sender?.name || "Admin",
-					files: [{ originalName: share.file.originalName }],
-					fileCount: 1
-				});
-			}
-		} catch (error) {
-			console.warn("WhatsApp file share notification failed:", error.message);
-		}
 
 		return res.status(201).json({ success: true, data: share });
 	} catch (error) {
@@ -99,20 +84,6 @@ const shareFileWithAdmins = async (req, res, next) => {
 			message: `${req.fileRecord.originalName} was sent by ${sender?.name || "a user"}`,
 			data: { fileId: req.fileRecord._id, shareId: shares[index]._id }
 		})));
-		await Promise.all(recipients.map(async (admin, index) => {
-			if (!admin.whatsappNumber) return;
-			try {
-				await sendFileShareWhatsAppMessage({
-					recipientNumber: admin.whatsappNumber,
-					recipientName: admin.name,
-					senderName: sender?.name || "Admin",
-					files: [{ originalName: req.fileRecord.originalName }],
-					fileCount: 1
-				});
-			} catch (error) {
-				console.warn("WhatsApp file share notification failed:", error.message);
-			}
-		}));
 		return res.status(201).json({ success: true, data: { sharedCount: shares.length, skippedCount: existingIds.size } });
 	} catch (error) {
 		next(error);
@@ -180,20 +151,6 @@ const shareFileWithTeam = async (req, res, next) => {
 			message: `${req.fileRecord.originalName} was shared with ${team.name}`,
 			data: { fileId: req.fileRecord._id, teamId: team._id }
 		})));
-		await Promise.all(recipients.map(async (member) => {
-			if (!member.whatsappNumber) return;
-			try {
-				await sendFileShareWhatsAppMessage({
-					recipientNumber: member.whatsappNumber,
-					recipientName: member.name,
-					senderName: sender?.name || "Admin",
-					files: [{ originalName: req.fileRecord.originalName }],
-					fileCount: 1
-				});
-			} catch (error) {
-				console.warn("WhatsApp file share notification failed:", error.message);
-			}
-		}));
 		return res.status(201).json({ success: true, data: { teamId: team._id, teamName: team.name, sharedCount: shares.length, skippedCount: members.length - recipients.length } });
 	} catch (error) {
 		next(error);

@@ -9,7 +9,7 @@ const normalizeWhatsappNumber = (value) => {
     return null;
   }
 
-  return `+${digitsOnly.startsWith("0") ? digitsOnly.replace(/^0+/, "") : digitsOnly}`;
+  return digitsOnly.startsWith("0") ? digitsOnly.replace(/^0+/, "") : digitsOnly;
 };
 
 const buildFileShareWhatsAppMessage = ({ recipientName, senderName, files = [], fileCount }) => {
@@ -27,23 +27,48 @@ const buildFileShareWhatsAppMessage = ({ recipientName, senderName, files = [], 
 const sendFileShareWhatsAppMessage = async ({ recipientNumber, recipientName, senderName, files, fileCount = 1 }) => {
   const token = process.env.WHATSAPP_TOKEN;
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const templateName = process.env.WHATSAPP_TEMPLATE_NAME;
+  const templateLanguage = process.env.WHATSAPP_TEMPLATE_LANGUAGE || "en_US";
 
   if (!token || !phoneNumberId) {
-    return { sent: false, reason: "not-configured" };
+    throw new Error("WhatsApp is not configured: set WHATSAPP_TOKEN and WHATSAPP_PHONE_NUMBER_ID");
   }
 
   const normalizedNumber = normalizeWhatsappNumber(recipientNumber);
   if (!normalizedNumber) {
-    return { sent: false, reason: "invalid-number" };
+    throw new Error("Recipient has an invalid WhatsApp number");
   }
 
-  const version = process.env.WHATSAPP_API_VERSION || "v20.0";
-  const message = buildFileShareWhatsAppMessage({
-    recipientName,
-    senderName,
-    files,
-    fileCount
-  });
+  const version = process.env.WHATSAPP_API_VERSION || "v23.0";
+  const count = Number.isFinite(fileCount) && fileCount > 0 ? fileCount : (Array.isArray(files) ? files.length : 1) || 1;
+  const fileEntries = (Array.isArray(files) ? files : [files]).filter(Boolean);
+  const requestBody = templateName
+    ? {
+        messaging_product: "whatsapp",
+        to: normalizedNumber,
+        type: "template",
+        template: {
+          name: templateName,
+          language: { code: templateLanguage },
+          components: [{
+            type: "body",
+            parameters: [
+              { type: "text", text: recipientName || "there" },
+              { type: "text", text: senderName || "Admin" },
+              { type: "text", text: `${count} file${count === 1 ? "" : "s"}` }
+            ]
+          }]
+        }
+      }
+    : {
+        messaging_product: "whatsapp",
+        to: normalizedNumber,
+        type: "text",
+        text: {
+          body: buildFileShareWhatsAppMessage({ recipientName, senderName, files: fileEntries, fileCount: count }),
+          preview_url: false
+        }
+      };
 
   const response = await fetch(`https://graph.facebook.com/${version}/${phoneNumberId}/messages`, {
     method: "POST",
@@ -51,15 +76,7 @@ const sendFileShareWhatsAppMessage = async ({ recipientNumber, recipientName, se
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to: normalizedNumber,
-      type: "text",
-      text: {
-        body: message,
-        preview_url: false
-      }
-    })
+    body: JSON.stringify(requestBody)
   });
 
   const payload = await response.json().catch(() => ({}));
