@@ -38,7 +38,12 @@ app.use("/api/files", fileRoutes);
 app.use("/api/shares", shareRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/orders", orderRoutes);
-
 app.use(errorHandler);
+app.use("/", (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API endpoint not found"
+  });
+});
 
 module.exports = app;
