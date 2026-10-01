@@ -14,7 +14,10 @@ const fileSchema = new mongoose.Schema(
 		resourceType: { type: String, required: true },
 		format: { type: String, default: null },
 		mimeType: { type: String, required: true },
-		size: { type: Number, required: true }
+		size: { type: Number, required: true },
+		widthInches: { type: Number, min: 0 },
+		heightInches: { type: Number, min: 0 },
+		resolutionDpi: { type: Number, min: 1 }
 	},
 	{ timestamps: true }
 );

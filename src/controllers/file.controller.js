@@ -1,6 +1,7 @@
 const File = require("../schema/File");
 const FileShare = require("../schema/FileShare");
 const { Readable } = require("stream");
+const sharp = require("sharp");
 const { cloudinary, uploadBuffer, getResourceType } = require("../config/cloudinary");
 const { getIO } = require("../config/socket");
 const { FILE_UPLOADED, FILE_DELETED } = require("../constants/events");
@@ -13,6 +14,18 @@ const uploadFile = async (req, res, next) => {
 		}
 
 		const files = await Promise.all(req.files.map(async (file) => {
+			const imageMetadata = file.mimetype.startsWith("image/")
+				? await sharp(file.buffer).metadata().catch(() => null)
+				: null;
+			const resolutionDpi = imageMetadata
+				? Number.isFinite(imageMetadata.density) && imageMetadata.density > 0 ? imageMetadata.density : 96
+				: undefined;
+			const widthInches = imageMetadata?.width && resolutionDpi
+				? Math.round((imageMetadata.width / resolutionDpi) * 100) / 100
+				: undefined;
+			const heightInches = imageMetadata?.height && resolutionDpi
+				? Math.round((imageMetadata.height / resolutionDpi) * 100) / 100
+				: undefined;
 			const uploaded = await uploadBuffer(file.buffer, {
 				resource_type: getResourceType(file.originalname),
 				public_id: `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9_-]/g, "-")}`
@@ -25,7 +38,10 @@ const uploadFile = async (req, res, next) => {
 				resourceType: uploaded.resource_type,
 				format: uploaded.format || null,
 				mimeType: file.mimetype,
-				size: file.size
+				size: file.size,
+				widthInches,
+				heightInches,
+				resolutionDpi
 			});
 		}));
 

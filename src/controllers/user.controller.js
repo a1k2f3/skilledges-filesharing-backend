@@ -114,7 +114,9 @@ const listUsers = async (req, res, next) => {
 
 const listDesigners = async (req, res, next) => {
 	try {
-		const designers = await User.find({ role: "designer", isActive: true })
+		const includeInactive = req.query.includeInactive === "true" && req.user.role === "admin";
+		const filter = { role: "designer", ...(includeInactive ? {} : { isActive: true }) };
+		const designers = await User.find(filter)
 			.select("name email whatsappNumber role isActive lastSeen createdAt")
 			.sort({ name: 1 });
 
@@ -123,6 +125,22 @@ const listDesigners = async (req, res, next) => {
 			count: designers.length,
 			data: designers
 		});
+	} catch (error) {
+		next(error);
+	}
+};
+
+const setDesignerStatus = async (req, res, next) => {
+	try {
+		if (typeof req.body.isActive !== "boolean") {
+			return res.status(400).json({ success: false, message: "isActive must be a boolean" });
+		}
+		const designer = await User.findOne({ _id: req.params.designerId, role: "designer" });
+		if (!designer) return res.status(404).json({ success: false, message: "Designer not found" });
+
+		designer.isActive = req.body.isActive;
+		await designer.save();
+		return res.json({ success: true, data: { _id: designer._id, isActive: designer.isActive } });
 	} catch (error) {
 		next(error);
 	}
@@ -208,5 +226,6 @@ module.exports = {
 	listDesigners,
 	getUser,
 	updateUser,
-	deactivateDesigner
+	deactivateDesigner,
+	setDesignerStatus
 };

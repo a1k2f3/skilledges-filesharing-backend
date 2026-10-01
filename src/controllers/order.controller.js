@@ -42,6 +42,8 @@ const createOrder = async (req, res, next) => {
 		const designName = String(req.body.designName || req.body.name || "").trim();
 		const customerName = String(req.body.customerName || req.body.customer || "").trim();
 		const format = String(req.body.format || "").trim();
+		const priority = ["Low", "Normal", "High", "Urgent"].includes(req.body.priority) ? req.body.priority : "Normal";
+		const productionNotes = typeof req.body.productionNotes === "string" ? req.body.productionNotes : typeof req.body.notes === "string" ? req.body.notes : "";
 		if (!orderNumber || !designName || !customerName || !format) {
 			return res.status(400).json({ success: false, message: "Order number, customer, design name, and format are required" });
 		}
@@ -80,8 +82,10 @@ const createOrder = async (req, res, next) => {
 			customerName,
 			designName,
 			format,
+			priority,
 			status: "Pending",
-			notes: typeof req.body.notes === "string" ? req.body.notes : "",
+			notes: productionNotes,
+			productionNotes,
 			sourceFiles
 		});
 		await order.populate(orderPopulate);

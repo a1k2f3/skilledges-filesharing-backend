@@ -9,8 +9,10 @@ const orderSchema = new mongoose.Schema(
 		assignedDesigner: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, index: true },
 		designName: { type: String, required: true, trim: true },
 		format: { type: String, required: true, trim: true },
+		priority: { type: String, enum: ["Low", "Normal", "High", "Urgent"], default: "Normal" },
 		status: { type: String, enum: ["Pending", "In Design", "Ready for Review", "Completed"], default: "Pending" },
 		notes: { type: String, default: "" },
+		productionNotes: { type: String, default: "" },
 		sourceFiles: [{ file: { type: mongoose.Schema.Types.ObjectId, ref: "File" }, name: String }],
 		sentToCustomer: { type: String, default: "" }
 	},

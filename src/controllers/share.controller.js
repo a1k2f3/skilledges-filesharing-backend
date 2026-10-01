@@ -96,7 +96,7 @@ const listReceivedShares = async (req, res, next) => {
 			sharedWith: req.user.id,
 			$or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
 		})
-			.populate("file", "originalName secureUrl size mimeType")
+			.populate("file", "originalName secureUrl size mimeType widthInches heightInches resolutionDpi")
 			.populate("sharedBy", "name email")
 			.sort({ createdAt: -1 });
 
@@ -109,7 +109,7 @@ const listReceivedShares = async (req, res, next) => {
 const listSentShares = async (req, res, next) => {
 	try {
 		const shares = await FileShare.find({ sharedBy: req.user.id })
-			.populate("file", "originalName secureUrl size mimeType format")
+			.populate("file", "originalName secureUrl size mimeType format widthInches heightInches resolutionDpi")
 			.populate("sharedWith", "name email role")
 			.sort({ createdAt: -1 });
 
