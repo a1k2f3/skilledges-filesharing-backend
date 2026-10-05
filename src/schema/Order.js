@@ -13,7 +13,11 @@ const orderSchema = new mongoose.Schema(
 		status: { type: String, enum: ["Pending", "In Design", "Ready for Review", "Completed"], default: "Pending" },
 		notes: { type: String, default: "" },
 		productionNotes: { type: String, default: "" },
-		sourceFiles: [{ file: { type: mongoose.Schema.Types.ObjectId, ref: "File" }, name: String }],
+		sourceFiles: [{
+			file: { type: mongoose.Schema.Types.ObjectId, ref: "File" },
+			name: String,
+			deliverables: [{ file: { type: mongoose.Schema.Types.ObjectId, ref: "File" }, name: String }]
+		}],
 		sentToCustomer: { type: String, default: "" }
 	},
 	{ timestamps: true }
