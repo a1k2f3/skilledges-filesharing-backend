@@ -7,7 +7,8 @@ const { ORDER_UPDATED } = require("../constants/events");
 
 const orderPopulate = [
 	{ path: "assignedDesigner", select: "name email" },
-	{ path: "sourceFiles.file", select: "originalName" }
+	{ path: "sourceFiles.file", select: "originalName" },
+	{ path: "sourceFiles.deliverables.file", select: "originalName" }
 ];
 
 const emitOrderUpdated = (order, action) => {
@@ -136,6 +137,37 @@ const updateOrder = async (req, res, next) => {
 	}
 };
 
+const attachOrderDeliverables = async (req, res, next) => {
+	try {
+		const order = await Order.findOne({ orderNumber: req.params.orderNumber, assignedDesigner: req.user.id });
+		if (!order) return res.status(404).json({ success: false, message: "Order not found or not assigned to you" });
+		const sourceFile = order.sourceFiles.find((item) => item.file.toString() === req.params.sourceFileId);
+		if (!sourceFile) return res.status(404).json({ success: false, message: "Source file is not part of this order" });
+		if (!Array.isArray(req.body.deliverableFiles) || req.body.deliverableFiles.length === 0) {
+			return res.status(400).json({ success: false, message: "At least one deliverable file is required" });
+		}
+		const fileIds = [...new Set(req.body.deliverableFiles.map((item) => String(item.fileKey || item.fileId || "")))];
+		if (fileIds.some((fileId) => !mongoose.Types.ObjectId.isValid(fileId))) {
+			return res.status(400).json({ success: false, message: "A valid deliverable file is required" });
+		}
+		const ownedFiles = await File.find({ _id: { $in: fileIds }, owner: req.user.id }).select("_id originalName");
+		if (ownedFiles.length !== fileIds.length) {
+			return res.status(403).json({ success: false, message: "Deliverable files must be uploaded by you" });
+		}
+		const existingFileIds = new Set(sourceFile.deliverables.map((item) => item.file.toString()));
+		for (const file of ownedFiles) {
+			if (!existingFileIds.has(file._id.toString())) sourceFile.deliverables.push({ file: file._id, name: file.originalName });
+		}
+		if (order.sourceFiles.length && order.sourceFiles.every((item) => item.deliverables.length > 0)) order.status = "Ready for Review";
+		await order.save();
+		await order.populate(orderPopulate);
+		emitOrderUpdated(order, "updated");
+		return res.json({ success: true, data: order });
+	} catch (error) {
+		next(error);
+	}
+};
+
 const deleteOrder = async (req, res, next) => {
 	try {
 		const order = await Order.findOneAndDelete({ orderNumber: req.params.orderNumber });
@@ -147,4 +179,4 @@ const deleteOrder = async (req, res, next) => {
 	}
 };
 
-module.exports = { listOrders, createOrder, assignOrder, updateOrder, deleteOrder };
+module.exports = { listOrders, createOrder, assignOrder, updateOrder, attachOrderDeliverables, deleteOrder };
