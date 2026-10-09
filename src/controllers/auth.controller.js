@@ -39,9 +39,11 @@ const createTestAdmin = async (req, res, next) => {
 			});
 		}
 
-		const existingUser = await User.findOne({ email: normalizedEmail });
+		const existingUser = await User.findOne({
+			$or: [{ email: normalizedEmail }, { username: normalizedEmail }]
+		});
 		if (existingUser) {
-			return res.status(409).json({ success: false, message: "A user with this email already exists" });
+			return res.status(409).json({ success: false, message: "An account with this email or username already exists" });
 		}
 
 		const user = await User.create({
@@ -67,22 +69,25 @@ const createTestAdmin = async (req, res, next) => {
 
 const login = async (req, res, next) => {
 	try {
-		const { email, password } = req.body;
-		const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
+		const { email, username, identifier, password } = req.body;
+		const loginIdentifier = identifier ?? email ?? username;
+		const normalizedIdentifier = typeof loginIdentifier === "string" ? loginIdentifier.trim().toLowerCase() : "";
 
-		if (!normalizedEmail || typeof password !== "string" || !password) {
+		if (!normalizedIdentifier || typeof password !== "string" || !password) {
 			return res.status(400).json({
 				success: false,
-				message: "Email and password are required"
+				message: "Username or email and password are required"
 			});
 		}
 
-		const user = await User.findOne({ email: normalizedEmail }).select("+password");
+		const user = await User.findOne({
+			$or: [{ email: normalizedIdentifier }, { username: normalizedIdentifier }]
+		}).select("+password");
 
 		if (!user || !(await comparePassword(password, user.password))) {
 			return res.status(401).json({
 				success: false,
-				message: "Invalid email or password"
+				message: "Invalid username or email, or password"
 			});
 		}
 
@@ -141,8 +146,10 @@ const signup = async (req, res, next) => {
 			});
 		}
 
-		if (await User.findOne({ email: normalizedEmail })) {
-			return res.status(409).json({ success: false, message: "A user with this email already exists" });
+		if (await User.findOne({
+			$or: [{ email: normalizedEmail }, { username: normalizedEmail }]
+		})) {
+			return res.status(409).json({ success: false, message: "An account with this email or username already exists" });
 		}
 
 		const isFirstUser = (await User.countDocuments()) === 0;
@@ -160,7 +167,7 @@ const signup = async (req, res, next) => {
 		return res.status(201).json({ success: true, token, data: responseUser });
 	} catch (error) {
 		if (error.code === 11000) {
-			return res.status(409).json({ success: false, message: "A user with this email already exists" });
+			return res.status(409).json({ success: false, message: "An account with this email or username already exists" });
 		}
 
 		next(error);

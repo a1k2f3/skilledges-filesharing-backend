@@ -4,7 +4,46 @@ const { normalizeWhatsappNumber } = require("../utils/whatsapp");
 
 const createUser = async (req, res, next) => {
 	try {
-		const { name, email, password, role, whatsappNumber } = req.body;
+		const { name, email, username, password, role, whatsappNumber } = req.body;
+		if (role === "designer") {
+			const normalizedUsername = typeof username === "string" ? username.trim().toLowerCase() : "";
+
+			if (normalizedUsername.length < 2 || normalizedUsername.length > 50 || typeof password !== "string") {
+				return res.status(400).json({
+					success: false,
+					message: "Username must be between 2 and 50 characters and password is required"
+				});
+			}
+
+			if (password.length < 6) {
+				return res.status(400).json({
+					success: false,
+					message: "Password must be at least 6 characters"
+				});
+			}
+
+			const existingIdentity = await User.findOne({
+				$or: [{ username: normalizedUsername }, { email: normalizedUsername }]
+			});
+			if (existingIdentity) {
+				return res.status(409).json({
+					success: false,
+					message: "An account with this username already exists"
+				});
+			}
+
+			const user = await User.create({
+				name: normalizedUsername,
+				username: normalizedUsername,
+				password: await hashPassword(password),
+				role: "designer"
+			});
+			const responseUser = user.toObject();
+			delete responseUser.password;
+
+			return res.status(201).json({ success: true, data: responseUser });
+		}
+
 		const normalizedName = typeof name === "string" ? name.trim() : "";
 		const normalizedEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
 		const normalizedWhatsappNumber = typeof whatsappNumber === "string" ? normalizeWhatsappNumber(whatsappNumber) : null;
@@ -37,12 +76,14 @@ const createUser = async (req, res, next) => {
 			});
 		}
 
-		const existingUser = await User.findOne({ email: normalizedEmail });
+		const existingUser = await User.findOne({
+			$or: [{ email: normalizedEmail }, { username: normalizedEmail }]
+		});
 
 		if (existingUser) {
 			return res.status(409).json({
 				success: false,
-				message: "A user with this email already exists"
+				message: "An account with this email or username already exists"
 			});
 		}
 
@@ -51,7 +92,7 @@ const createUser = async (req, res, next) => {
 			email: normalizedEmail,
 			whatsappNumber: normalizedWhatsappNumber,
 			password: await hashPassword(password),
-			role: ["admin", "designer"].includes(role) ? role : "user"
+			role: role === "admin" ? "admin" : "user"
 		});
 
 		const responseUser = user.toObject();
@@ -65,7 +106,7 @@ const createUser = async (req, res, next) => {
 		if (error.code === 11000) {
 			return res.status(409).json({
 				success: false,
-				message: "A user with this email already exists"
+				message: "An account with this email or username already exists"
 			});
 		}
 
@@ -99,7 +140,7 @@ const listUsers = async (req, res, next) => {
 		if (req.query.role) filter.role = req.query.role;
 
 		const users = await User.find(filter)
-			.select("name email whatsappNumber role isActive lastSeen createdAt")
+			.select("name username email whatsappNumber role isActive lastSeen createdAt")
 			.sort({ name: 1 });
 
 		return res.json({
@@ -117,7 +158,7 @@ const listDesigners = async (req, res, next) => {
 		const includeInactive = req.query.includeInactive === "true" && req.user.role === "admin";
 		const filter = { role: "designer", ...(includeInactive ? {} : { isActive: true }) };
 		const designers = await User.find(filter)
-			.select("name email whatsappNumber role isActive lastSeen createdAt")
+			.select("name username email whatsappNumber role isActive lastSeen createdAt")
 			.sort({ name: 1 });
 
 		return res.json({
