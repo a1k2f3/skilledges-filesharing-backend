@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const Order = require("../schema/Order");
 const User = require("../schema/User");
 const File = require("../schema/File");
+const DesignerDelivery = require("../schema/DesignerDelivery");
 const { getIO } = require("../config/socket");
 const { ORDER_UPDATED } = require("../constants/events");
 
@@ -32,6 +33,39 @@ const listOrders = async (req, res, next) => {
 		}
 		const orders = await Order.find(filter).populate(orderPopulate).sort({ createdAt: -1 });
 		return res.json({ success: true, count: orders.length, data: orders });
+	} catch (error) {
+		next(error);
+	}
+};
+
+const listDesignerDeliveryReport = async (req, res, next) => {
+	try {
+		const start = typeof req.query.start === "string" ? new Date(req.query.start) : null;
+		const end = typeof req.query.end === "string" ? new Date(req.query.end) : null;
+		if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
+			return res.status(400).json({ success: false, message: "A valid report start and end date are required" });
+		}
+
+		const [designerAccounts, deliveries] = await Promise.all([User.find({ role: "designer" }).select("name").sort({ name: 1 }).lean(), DesignerDelivery.aggregate([
+			{ $match: { receivedAt: { $gte: start, $lt: end } } },
+			{ $group: { _id: "$designer", designerName: { $first: "$designerName" }, logoCount: { $sum: 1 } } },
+			{ $sort: { logoCount: -1, designerName: 1 } }
+		])]);
+		const deliveryCounts = new Map(deliveries.map((delivery) => [delivery._id.toString(), delivery]));
+		const rows = designerAccounts.map((designer) => {
+			const delivery = deliveryCounts.get(designer._id.toString());
+			return { designerId: designer._id.toString(), designerName: delivery?.designerName || designer.name, logoCount: delivery?.logoCount || 0 };
+		});
+		for (const delivery of deliveries) {
+			if (!rows.some((designer) => designer.designerId === delivery._id.toString())) {
+				rows.push({ designerId: delivery._id.toString(), designerName: delivery.designerName, logoCount: delivery.logoCount });
+			}
+		}
+		rows.sort((first, second) => second.logoCount - first.logoCount || first.designerName.localeCompare(second.designerName));
+		return res.json({
+			success: true,
+			data: { total: rows.reduce((sum, designer) => sum + designer.logoCount, 0), designers: rows }
+		});
 	} catch (error) {
 		next(error);
 	}
@@ -160,6 +194,26 @@ const attachOrderDeliverables = async (req, res, next) => {
 		}
 		if (order.sourceFiles.length && order.sourceFiles.every((item) => item.deliverables.length > 0)) order.status = "Ready for Review";
 		await order.save();
+		const designer = await User.findById(req.user.id).select("name");
+		const receivedAt = new Date();
+		await DesignerDelivery.bulkWrite(ownedFiles.map((file) => ({
+			updateOne: {
+				filter: { orderNumber: order.orderNumber, deliverableFileId: file._id.toString() },
+				update: {
+					$setOnInsert: {
+						designer: req.user.id,
+						designerName: designer?.name || "Designer",
+						orderNumber: order.orderNumber,
+						designName: order.designName,
+						sourceFileName: sourceFile.name || "",
+						fileName: file.originalName,
+						deliverableFileId: file._id.toString(),
+						receivedAt
+					}
+				},
+				upsert: true
+			}
+		})), { ordered: false });
 		await order.populate(orderPopulate);
 		emitOrderUpdated(order, "updated");
 		return res.json({ success: true, data: order });
@@ -179,4 +233,4 @@ const deleteOrder = async (req, res, next) => {
 	}
 };
 
-module.exports = { listOrders, createOrder, assignOrder, updateOrder, attachOrderDeliverables, deleteOrder };
+module.exports = { listOrders, listDesignerDeliveryReport, createOrder, assignOrder, updateOrder, attachOrderDeliverables, deleteOrder };
