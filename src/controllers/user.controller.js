@@ -1,4 +1,7 @@
+const mongoose = require("mongoose");
 const User = require("../schema/User");
+const Order = require("../schema/Order");
+const Team = require("../schema/Team");
 const { hashPassword } = require("../utils/password");
 const { normalizeWhatsappNumber } = require("../utils/whatsapp");
 
@@ -201,14 +204,46 @@ const updateUser = async (req, res, next) => {
 		if (typeof req.body.name === "string") {
 			const name = req.body.name.trim();
 
-			if (!name) {
+			if (name.length < 2 || name.length > 100) {
 				return res.status(400).json({
 					success: false,
-					message: "Name cannot be empty"
+					message: "Name must be between 2 and 100 characters"
 				});
 			}
 
 			updates.name = name;
+		}
+
+		if (Object.prototype.hasOwnProperty.call(req.body, "email")) {
+			if (req.body.email === null || req.body.email === "") {
+				updates.email = null;
+			} else if (typeof req.body.email !== "string") {
+				return res.status(400).json({
+					success: false,
+					message: "Email must be a valid email address"
+				});
+			} else {
+				const email = req.body.email.trim().toLowerCase();
+				if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+					return res.status(400).json({
+						success: false,
+						message: "Email must be a valid email address"
+					});
+				}
+
+				const existingIdentity = await User.findOne({
+					_id: { $ne: req.targetUser._id },
+					$or: [{ email }, { username: email }]
+				});
+				if (existingIdentity) {
+					return res.status(409).json({
+						success: false,
+						message: "An account with this email or username already exists"
+					});
+				}
+
+				updates.email = email;
+			}
 		}
 
 		if (typeof req.body.whatsappNumber === "string") {
@@ -245,16 +280,25 @@ const updateUser = async (req, res, next) => {
 	}
 };
 
-const deactivateDesigner = async (req, res, next) => {
+const deleteDesigner = async (req, res, next) => {
 	try {
-		const designer = await User.findOne({ _id: req.params.designerId, role: "designer", isActive: true });
-		if (!designer) {
-			return res.status(404).json({ success: false, message: "Active designer not found" });
+		if (!mongoose.Types.ObjectId.isValid(req.params.designerId)) {
+			return res.status(400).json({ success: false, message: "A valid designerId is required" });
 		}
 
-		designer.isActive = false;
-		await designer.save();
-		return res.json({ success: true, data: { _id: designer._id, isActive: designer.isActive } });
+		const designer = await User.findOne({ _id: req.params.designerId, role: "designer" });
+		if (!designer) {
+			return res.status(404).json({ success: false, message: "Designer not found" });
+		}
+
+		await Order.updateMany({ assignedDesigner: designer._id }, { $set: { assignedDesigner: null } });
+		await Team.updateMany({ members: designer._id }, { $pull: { members: designer._id } });
+		await Team.updateMany(
+			{ owner: designer._id },
+			{ $set: { owner: req.user.id }, $addToSet: { members: req.user.id } }
+		);
+		await designer.deleteOne();
+		return res.json({ success: true, data: { _id: designer._id } });
 	} catch (error) {
 		next(error);
 	}
@@ -267,6 +311,6 @@ module.exports = {
 	listDesigners,
 	getUser,
 	updateUser,
-	deactivateDesigner,
+	deleteDesigner,
 	setDesignerStatus
 };
