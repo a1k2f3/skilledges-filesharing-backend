@@ -10,7 +10,7 @@ const {
 	listDesigners,
 	getUser,
 	updateUser,
-	deactivateDesigner,
+	deleteDesigner,
 	setDesignerStatus
 } = require("../controllers/user.controller");
 
@@ -20,11 +20,11 @@ router.post("/signup", signup);
 router.use(authenticate);
 
 router.get("/me", getCurrentUser);
-router.get("/designers", listDesigners);
+router.get("/designers", requireRole("admin"), listDesigners);
 router.patch("/designers/:designerId/status", requireRole("admin"), setDesignerStatus);
 router.post("/", requireRole("admin"), createUser);
 router.get("/", requireRole("admin"), listUsers);
-router.delete("/designers/:designerId", requireRole("admin"), deactivateDesigner);
+router.delete("/designers/:designerId", requireRole("admin"), deleteDesigner);
 router.get("/:userId", loadUser, requireUserAccess, getUser);
 router.patch("/:userId", loadUser, requireUserAccess, updateUser);
 

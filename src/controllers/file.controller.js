@@ -65,7 +65,7 @@ const uploadFile = async (req, res, next) => {
 const listFiles = async (req, res, next) => {
 	try {
 		const files = await File.find(req.user.role === "admin" ? {} : { owner: req.user.id })
-			.populate("owner", "name email role")
+			.populate("owner", "name username email role")
 			.sort({ createdAt: -1 });
 		return res.json({ success: true, count: files.length, data: files });
 	} catch (error) {

@@ -18,6 +18,16 @@ const shareFile = async (req, res, next) => {
 			return res.status(400).json({ success: false, message: "You cannot share a file with yourself" });
 		}
 
+		const isAllowedExchange = req.user.role === "admin"
+			? ["user", "designer"].includes(recipient.role)
+			: ["user", "designer"].includes(req.user.role) && recipient.role === "admin";
+		if (!isAllowedExchange) {
+			return res.status(403).json({ success: false, message: "Files can only be shared between customers, designers, and admins as permitted by your role" });
+		}
+		if (!recipient.isActive) {
+			return res.status(400).json({ success: false, message: "Cannot share a file with an inactive account" });
+		}
+
 		let share = await FileShare.findOne({ file: req.fileRecord._id, sharedWith: recipient._id });
 		if (share) return res.json({ success: true, data: share });
 
@@ -80,7 +90,7 @@ const shareFileWithAdmins = async (req, res, next) => {
 		await Promise.all(recipients.map((admin, index) => createNotification({
 			recipient: admin._id,
 			type: "file-shared",
-			title: "Designer file received",
+			title: "New design file received",
 			message: `${req.fileRecord.originalName} was sent by ${sender?.name || "a user"}`,
 			data: { fileId: req.fileRecord._id, shareId: shares[index]._id }
 		})));
@@ -92,8 +102,14 @@ const shareFileWithAdmins = async (req, res, next) => {
 
 const listReceivedShares = async (req, res, next) => {
 	try {
+		let senderFilter = {};
+		if (req.user.role !== "admin") {
+			const admins = await User.find({ role: "admin" }).select("_id");
+			senderFilter = { sharedBy: { $in: admins.map((admin) => admin._id) } };
+		}
 		const shares = await FileShare.find({
 			sharedWith: req.user.id,
+			...senderFilter,
 			$or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
 		})
 			.populate("file", "originalName secureUrl size mimeType widthInches heightInches resolutionDpi")
@@ -108,7 +124,12 @@ const listReceivedShares = async (req, res, next) => {
 
 const listSentShares = async (req, res, next) => {
 	try {
-		const shares = await FileShare.find({ sharedBy: req.user.id })
+		let recipientFilter = {};
+		if (req.user.role !== "admin") {
+			const admins = await User.find({ role: "admin" }).select("_id");
+			recipientFilter = { sharedWith: { $in: admins.map((admin) => admin._id) } };
+		}
+		const shares = await FileShare.find({ sharedBy: req.user.id, ...recipientFilter })
 			.populate("file", "originalName secureUrl size mimeType format widthInches heightInches resolutionDpi")
 			.populate("sharedWith", "name email role")
 			.sort({ createdAt: -1 });
