@@ -20,7 +20,7 @@ router.post("/signup", signup);
 router.use(authenticate);
 
 router.get("/me", getCurrentUser);
-router.get("/designers", listDesigners);
+router.get("/designers", requireRole("admin"), listDesigners);
 router.patch("/designers/:designerId/status", requireRole("admin"), setDesignerStatus);
 router.post("/", requireRole("admin"), createUser);
 router.get("/", requireRole("admin"), listUsers);

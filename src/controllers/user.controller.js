@@ -8,7 +8,7 @@ const { normalizeWhatsappNumber } = require("../utils/whatsapp");
 const createUser = async (req, res, next) => {
 	try {
 		const { name, email, username, password, role, whatsappNumber } = req.body;
-		if (role === "designer") {
+		if (role === "designer" || role === "user") {
 			const normalizedUsername = typeof username === "string" ? username.trim().toLowerCase() : "";
 
 			if (normalizedUsername.length < 2 || normalizedUsername.length > 50 || typeof password !== "string") {
@@ -39,7 +39,7 @@ const createUser = async (req, res, next) => {
 				name: normalizedUsername,
 				username: normalizedUsername,
 				password: await hashPassword(password),
-				role: "designer"
+				role
 			});
 			const responseUser = user.toObject();
 			delete responseUser.password;

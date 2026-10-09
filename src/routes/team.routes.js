@@ -9,7 +9,7 @@ const router = express.Router();
 router.use(authenticate);
 
 router.get("/", requireRole("admin"), listTeams);
-router.get("/mine", listMyTeams);
+router.get("/mine", requireRole("admin"), listMyTeams);
 router.get("/:teamId", requireRole("admin"), getTeam);
 router.post("/", requireRole("admin"), createTeam);
 router.patch("/:teamId", requireTeamAdmin, updateTeam);
