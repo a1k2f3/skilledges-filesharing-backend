@@ -14,8 +14,11 @@ const sendPushNotification = async ({ recipient, title, message, url = "/dashboa
 		try {
 			await webpush.sendNotification({ endpoint: subscription.endpoint, keys: subscription.keys }, payload);
 		} catch (error) {
-			if (error.statusCode === 404 || error.statusCode === 410) {
+			if ([401, 403, 404, 410].includes(error.statusCode)) {
 				await subscription.deleteOne();
+				if (error.statusCode === 401 || error.statusCode === 403) {
+					console.warn("Removed an invalid device notification subscription; the user must enable device alerts again.");
+				}
 				return;
 			}
 			console.warn("Web push notification failed:", error.message);
