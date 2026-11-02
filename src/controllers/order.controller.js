@@ -23,16 +23,25 @@ const emitOrderUpdated = (order, action) => {
 	for (const userId of new Set(userIds)) io.to(`user:${userId}`).emit(ORDER_UPDATED, payload);
 };
 
+const serializeOrderForRole = (order, role) => {
+	const result = order.toObject();
+	if (role === "designer") {
+		result.customerName = "Customer";
+		result.customerUser = null;
+		delete result.createdBy;
+	}
+	if (role === "user") result.assignedDesigner = null;
+	return result;
+};
+
 const listOrders = async (req, res, next) => {
 	try {
 		let filter = {};
 		if (req.user.role === "designer") filter = { assignedDesigner: req.user.id };
-		if (req.user.role === "user") {
-			const user = await User.findById(req.user.id).select("name");
-			filter = { $or: [{ createdBy: req.user.id }, { customerUser: req.user.id }, { customerName: user?.name }] };
-		}
+		if (req.user.role === "user") filter = { $or: [{ createdBy: req.user.id }, { customerUser: req.user.id }] };
 		const orders = await Order.find(filter).populate(orderPopulate).sort({ createdAt: -1 });
-		return res.json({ success: true, count: orders.length, data: orders });
+		const data = orders.map((order) => serializeOrderForRole(order, req.user.role));
+		return res.json({ success: true, count: data.length, data });
 	} catch (error) {
 		next(error);
 	}
@@ -75,11 +84,18 @@ const createOrder = async (req, res, next) => {
 	try {
 		const orderNumber = String(req.body.orderNumber || req.body.id || "").trim();
 		const designName = String(req.body.designName || req.body.name || "").trim();
-		const customerName = String(req.body.customerName || req.body.customer || "").trim();
+		let customerName = String(req.body.customerName || req.body.customer || "").trim();
 		const format = String(req.body.format || "").trim();
+		const software = req.body.software;
 		const priority = ["Low", "Normal", "High", "Urgent"].includes(req.body.priority) ? req.body.priority : "Normal";
 		const productionNotes = typeof req.body.productionNotes === "string" ? req.body.productionNotes : typeof req.body.notes === "string" ? req.body.notes : "";
-		if (!orderNumber || !designName || !customerName || !format) {
+		if (software !== undefined && !["Wilcom", "WingsXP"].includes(software)) {
+			return res.status(400).json({ success: false, message: "Software must be Wilcom or WingsXP" });
+		}
+		if (req.user.role === "user" && !software) {
+			return res.status(400).json({ success: false, message: "Select Wilcom or WingsXP for this design" });
+		}
+		if (!orderNumber || !designName || !format || (req.user.role === "admin" && !customerName)) {
 			return res.status(400).json({ success: false, message: "Order number, customer, design name, and format are required" });
 		}
 
@@ -89,10 +105,15 @@ const createOrder = async (req, res, next) => {
 				return res.status(409).json({ success: false, message: "An order with this number already exists" });
 			}
 			await existing.populate(orderPopulate);
-			return res.json({ success: true, data: existing });
+			return res.json({ success: true, data: serializeOrderForRole(existing, req.user.role) });
 		}
 
 		let customerUser = req.user.role === "user" ? req.user.id : null;
+		if (req.user.role === "user") {
+			const customer = await User.findById(req.user.id).select("name");
+			if (!customer) return res.status(404).json({ success: false, message: "Customer account not found" });
+			customerName = customer.name;
+		}
 		if (req.user.role === "admin") {
 			const customer = await User.findOne({ name: customerName, role: "user", isActive: true }).select("_id");
 			customerUser = customer?._id || null;
@@ -117,6 +138,7 @@ const createOrder = async (req, res, next) => {
 			customerName,
 			designName,
 			format,
+			software: software || undefined,
 			priority,
 			status: "Pending",
 			notes: productionNotes,
@@ -129,7 +151,9 @@ const createOrder = async (req, res, next) => {
 	} catch (error) {
 		if (error.code === 11000) {
 			const existing = await Order.findOne({ orderNumber: req.body.orderNumber || req.body.id }).populate(orderPopulate);
-			if (existing) return res.json({ success: true, data: existing });
+			if (existing && (req.user.role === "admin" || existing.createdBy.toString() === req.user.id)) {
+				return res.json({ success: true, data: serializeOrderForRole(existing, req.user.role) });
+			}
 		}
 		next(error);
 	}
@@ -146,7 +170,7 @@ const assignOrder = async (req, res, next) => {
 		).populate(orderPopulate);
 		if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 		emitOrderUpdated(order, "assigned");
-		return res.json({ success: true, data: order });
+		return res.json({ success: true, data: serializeOrderForRole(order, req.user.role) });
 	} catch (error) {
 		next(error);
 	}
@@ -165,7 +189,7 @@ const updateOrder = async (req, res, next) => {
 		const order = await Order.findOneAndUpdate(filter, { $set: update }, { new: true, runValidators: true }).populate(orderPopulate);
 		if (!order) return res.status(404).json({ success: false, message: "Order not found or not assigned to you" });
 		emitOrderUpdated(order, "updated");
-		return res.json({ success: true, data: order });
+		return res.json({ success: true, data: serializeOrderForRole(order, req.user.role) });
 	} catch (error) {
 		next(error);
 	}
@@ -216,7 +240,7 @@ const attachOrderDeliverables = async (req, res, next) => {
 		})), { ordered: false });
 		await order.populate(orderPopulate);
 		emitOrderUpdated(order, "updated");
-		return res.json({ success: true, data: order });
+		return res.json({ success: true, data: serializeOrderForRole(order, req.user.role) });
 	} catch (error) {
 		next(error);
 	}

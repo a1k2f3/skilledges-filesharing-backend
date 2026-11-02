@@ -27,18 +27,6 @@ const initializeSocket = (server) => {
     socket.join(`user:${socket.user.id}`);
     if (socket.user.role === "admin") socket.join("admin");
 
-    socket.on("join:user", (userId) => {
-      socket.join(`user:${userId}`);
-
-      console.log(`User ${userId} joined their room`);
-    });
-
-    socket.on("join:admin", () => {
-      socket.join("admin");
-
-      console.log("Admin joined admin room");
-    });
-
     socket.on("disconnect", () => {
       console.log(`Socket disconnected: ${socket.id}`);
     });
