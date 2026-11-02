@@ -55,6 +55,19 @@ const uploadFile = async (req, res, next) => {
 			message: `${files.length} file${files.length === 1 ? "" : "s"} uploaded successfully`,
 			data: { fileIds: files.map((file) => file._id) }
 		});
+		const [admins, uploader] = await Promise.all([
+			User.find({ role: "admin", isActive: true }).select("_id"),
+			User.findById(req.user.id).select("name")
+		]);
+		await Promise.all(admins
+			.filter((admin) => admin._id.toString() !== req.user.id)
+			.map((admin) => createNotification({
+				recipient: admin._id,
+				type: "file-uploaded",
+				title: "New files uploaded",
+				message: `${files.length} file${files.length === 1 ? "" : "s"} uploaded by ${uploader?.name || "a user"}`,
+				data: { fileIds: files.map((file) => file._id), ownerId: req.user.id }
+			})));
 		getIO().to(`user:${req.user.id}`).emit(FILE_UPLOADED, payload);
 		getIO().to("admin").emit(FILE_UPLOADED, { ...payload, ownerId: req.user.id });
 

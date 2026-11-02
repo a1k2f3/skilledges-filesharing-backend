@@ -8,7 +8,8 @@ const createNotification = async ({ recipient, type, title, message, data = {} }
 	const notification = await Notification.create({ recipient, type, title, message, data });
 	getIO().to(`user:${recipient.toString()}`).emit(NOTIFICATION_NEW, notification);
 	try {
-		await sendPushNotification({ recipient, title, message, url: type === "file-shared" ? "/files" : "/dashboard" });
+		const url = type.startsWith("file-") ? "/files" : "/orders";
+		await sendPushNotification({ recipient, title, message, url });
 	} catch (error) {
 		console.warn("Web push notification failed:", error.message);
 	}

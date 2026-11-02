@@ -5,6 +5,7 @@ const File = require("../schema/File");
 const DesignerDelivery = require("../schema/DesignerDelivery");
 const { getIO } = require("../config/socket");
 const { ORDER_UPDATED } = require("../constants/events");
+const { createNotification } = require("./notification.controller");
 
 const orderPopulate = [
 	{ path: "assignedDesigner", select: "name email" },
@@ -21,6 +22,27 @@ const emitOrderUpdated = (order, action) => {
 	const payload = { orderNumber: order.orderNumber, action };
 	io.to("admin").emit(ORDER_UPDATED, payload);
 	for (const userId of new Set(userIds)) io.to(`user:${userId}`).emit(ORDER_UPDATED, payload);
+};
+
+const notifyOrderParticipants = async (order, { actorId, excludeUserIds = [], type, title, message, includeAdmins = false }) => {
+	const excludedIds = new Set([actorId, ...excludeUserIds].filter(Boolean).map((userId) => userId.toString()));
+	const recipientIds = [order.createdBy, order.customerUser, order.assignedDesigner]
+		.map((user) => user?._id || user)
+		.filter(Boolean)
+		.map((userId) => userId.toString())
+		.filter((userId) => !excludedIds.has(userId));
+	if (includeAdmins) {
+		const admins = await User.find({ role: "admin", isActive: true }).select("_id");
+		recipientIds.push(...admins.map((admin) => admin._id.toString()).filter((userId) => !excludedIds.has(userId)));
+	}
+	const uniqueRecipientIds = [...new Set(recipientIds)];
+	await Promise.all(uniqueRecipientIds.map((recipient) => createNotification({
+		recipient,
+		type,
+		title,
+		message,
+		data: { orderNumber: order.orderNumber, designName: order.designName }
+	})));
 };
 
 const serializeOrderForRole = (order, role) => {
@@ -271,6 +293,33 @@ const assignOrder = async (req, res, next) => {
 		).populate(orderPopulate);
 		if (!order) return res.status(404).json({ success: false, message: "Order not found" });
 		emitOrderUpdated(order, "assigned");
+		const designerId = order.assignedDesigner?._id?.toString();
+		const sourceFileNames = order.sourceFiles
+			.map((sourceFile) => sourceFile.name || sourceFile.file?.originalName)
+			.filter(Boolean);
+		await notifyOrderParticipants(order, {
+			actorId: req.user.id,
+			excludeUserIds: designerId ? [designerId] : [],
+			type: "order-updated",
+			title: order.sourceFiles.length ? "New design files assigned" : "Design assigned",
+			message: order.sourceFiles.length
+				? `${order.designName} was assigned to ${order.assignedDesigner?.name || "a designer"} with ${order.sourceFiles.length} source file${order.sourceFiles.length === 1 ? "" : "s"}`
+				: `${order.designName} was assigned to ${order.assignedDesigner?.name || "a designer"}`
+		});
+		if (designerId) {
+			const filesDescription = sourceFileNames.length ? ` Files: ${sourceFileNames.join(", ").slice(0, 300)}.` : "";
+			await createNotification({
+				recipient: designerId,
+				type: "order-updated",
+				title: order.sourceFiles.length ? "New order and files received" : "New order received",
+				message: `You received ${order.designName}.${filesDescription}`,
+				data: {
+					orderNumber: order.orderNumber,
+					designName: order.designName,
+					fileIds: order.sourceFiles.map((sourceFile) => sourceFile.file?._id || sourceFile.file).filter(Boolean)
+				}
+			});
+		}
 		return res.json({ success: true, data: serializeOrderForRole(order, req.user.role) });
 	} catch (error) {
 		next(error);
@@ -290,6 +339,12 @@ const updateOrder = async (req, res, next) => {
 		const order = await Order.findOneAndUpdate(filter, { $set: update }, { new: true, runValidators: true }).populate(orderPopulate);
 		if (!order) return res.status(404).json({ success: false, message: "Order not found or not assigned to you" });
 		emitOrderUpdated(order, "updated");
+		await notifyOrderParticipants(order, {
+			actorId: req.user.id,
+			type: "order-updated",
+			title: "Order updated",
+			message: `${order.designName} status changed to ${order.status}`
+		});
 		return res.json({ success: true, data: serializeOrderForRole(order, req.user.role) });
 	} catch (error) {
 		next(error);
@@ -314,8 +369,9 @@ const attachOrderDeliverables = async (req, res, next) => {
 			return res.status(403).json({ success: false, message: "Deliverable files must be uploaded by you" });
 		}
 		const existingFileIds = new Set(sourceFile.deliverables.map((item) => item.file.toString()));
-		for (const file of ownedFiles) {
-			if (!existingFileIds.has(file._id.toString())) sourceFile.deliverables.push({ file: file._id, name: file.originalName });
+		const newFiles = ownedFiles.filter((file) => !existingFileIds.has(file._id.toString()));
+		for (const file of newFiles) {
+			sourceFile.deliverables.push({ file: file._id, name: file.originalName });
 		}
 		if (order.sourceFiles.length && order.sourceFiles.every((item) => item.deliverables.length > 0)) order.status = "Ready for Review";
 		await order.save();
@@ -341,6 +397,26 @@ const attachOrderDeliverables = async (req, res, next) => {
 		})), { ordered: false });
 		await order.populate(orderPopulate);
 		emitOrderUpdated(order, "updated");
+		await notifyOrderParticipants(order, {
+			actorId: req.user.id,
+			type: "designer-delivery",
+			title: "Designer sent deliverables",
+			message: `New deliverables are ready for ${order.designName}`,
+			includeAdmins: true
+		});
+		if (newFiles.length) {
+			await createNotification({
+				recipient: req.user.id,
+				type: "designer-delivery",
+				title: "Deliverables sent",
+				message: `${newFiles.length} file${newFiles.length === 1 ? "" : "s"} sent for ${order.designName}`,
+				data: {
+					orderNumber: order.orderNumber,
+					designName: order.designName,
+					fileIds: newFiles.map((file) => file._id)
+				}
+			});
+		}
 		return res.json({ success: true, data: serializeOrderForRole(order, req.user.role) });
 	} catch (error) {
 		next(error);

@@ -5,7 +5,7 @@ const notificationSchema = new mongoose.Schema(
 		recipient: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
 		type: {
 			type: String,
-			enum: ["file-uploaded", "file-deleted", "file-shared", "file-share-revoked"],
+			enum: ["file-uploaded", "file-deleted", "file-shared", "file-share-revoked", "designer-delivery", "order-updated"],
 			required: true
 		},
 		title: { type: String, required: true, trim: true, maxlength: 160 },
