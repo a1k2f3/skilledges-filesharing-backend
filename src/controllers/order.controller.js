@@ -80,6 +80,107 @@ const listDesignerDeliveryReport = async (req, res, next) => {
 	}
 };
 
+const listLogoActivityReport = async (req, res, next) => {
+	try {
+		const { start: startValue, end: endValue } = req.query;
+		const parseDate = (value) => {
+			if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+			const [year, month, day] = value.split("-").map(Number);
+			const date = new Date(Date.UTC(year, month - 1, day));
+			return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? date : null;
+		};
+		const start = parseDate(startValue);
+		const lastDay = parseDate(endValue);
+		if (!start || !lastDay || start > lastDay) {
+			return res.status(400).json({ success: false, message: "Valid start and end dates are required" });
+		}
+		const end = new Date(lastDay.getTime() + 24 * 60 * 60 * 1000);
+		const dayCount = (end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000);
+		if (dayCount > 366) {
+			return res.status(400).json({ success: false, message: "Report date range cannot exceed 366 days" });
+		}
+
+		let customerIds;
+		let orderNumbers;
+		const designerAccounts = req.user.role === "admin"
+			? await User.find({ role: "designer" }).select("_id name").sort({ name: 1 }).lean()
+			: [];
+		if (req.user.role === "admin") {
+			customerIds = (await User.find({ role: "user" }).distinct("_id"));
+		} else {
+			customerIds = [new mongoose.Types.ObjectId(req.user.id)];
+			const orders = await Order.find({
+				$or: [{ customerUser: req.user.id }, { createdBy: req.user.id }]
+			}).select("orderNumber").lean();
+			orderNumbers = orders.map((order) => order.orderNumber);
+		}
+
+		const [uploadRows, deliveryRows] = await Promise.all([
+			File.aggregate([
+				{ $match: { owner: { $in: customerIds }, createdAt: { $gte: start, $lt: end } } },
+				{ $group: {
+					_id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "UTC" } },
+					count: { $sum: 1 }
+				} }
+			]),
+			req.user.role === "admin" || orderNumbers.length
+				? DesignerDelivery.aggregate([
+					{ $match: {
+						receivedAt: { $gte: start, $lt: end },
+						...(req.user.role === "user" ? { orderNumber: { $in: orderNumbers } } : {})
+					} },
+					{ $group: {
+						_id: {
+							date: { $dateToString: { format: "%Y-%m-%d", date: "$receivedAt", timezone: "UTC" } },
+							designerId: "$designer"
+						},
+						designerName: { $first: "$designerName" },
+						count: { $sum: 1 }
+					} }
+				])
+				: Promise.resolve([])
+		]);
+
+		const daily = [];
+		const designerNames = new Map(designerAccounts.map((designer) => [designer._id.toString(), designer.name]));
+		for (let day = new Date(start); day < end; day.setUTCDate(day.getUTCDate() + 1)) {
+			const date = day.toISOString().slice(0, 10);
+			const designers = deliveryRows
+				.filter((row) => row._id.date === date)
+				.map((row) => {
+					const designerId = row._id.designerId.toString();
+					designerNames.set(designerId, row.designerName);
+					return { designerId, designerName: row.designerName, logoCount: row.count };
+				});
+			const customerUploads = uploadRows.find((row) => row._id === date)?.count || 0;
+			const designerDeliveries = designers.reduce((total, designer) => total + designer.logoCount, 0);
+			daily.push({
+				date,
+				designerDeliveries,
+				customerUploads,
+				customerReceived: designerDeliveries,
+				designers
+			});
+		}
+
+		return res.json({
+			success: true,
+			data: {
+				role: req.user.role,
+				designers: [...designerNames].map(([designerId, designerName]) => ({ designerId, designerName })),
+				daily,
+				totals: {
+					designerDeliveries: daily.reduce((total, row) => total + row.designerDeliveries, 0),
+					customerUploads: daily.reduce((total, row) => total + row.customerUploads, 0),
+					customerReceived: daily.reduce((total, row) => total + row.customerReceived, 0)
+				}
+			}
+		});
+	} catch (error) {
+		next(error);
+	}
+};
+
 const createOrder = async (req, res, next) => {
 	try {
 		const orderNumber = String(req.body.orderNumber || req.body.id || "").trim();
@@ -257,4 +358,4 @@ const deleteOrder = async (req, res, next) => {
 	}
 };
 
-module.exports = { listOrders, listDesignerDeliveryReport, createOrder, assignOrder, updateOrder, attachOrderDeliverables, deleteOrder };
+module.exports = { listOrders, listDesignerDeliveryReport, listLogoActivityReport, createOrder, assignOrder, updateOrder, attachOrderDeliverables, deleteOrder };
