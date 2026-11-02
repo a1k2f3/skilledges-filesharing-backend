@@ -1,5 +1,7 @@
+const mongoose = require("mongoose");
 const File = require("../schema/File");
 const FileShare = require("../schema/FileShare");
+const User = require("../schema/User");
 const { Readable } = require("stream");
 const sharp = require("sharp");
 const { cloudinary, uploadBuffer, getResourceType } = require("../config/cloudinary");
@@ -128,11 +130,29 @@ const deleteFilesBulk = async (req, res, next) => {
 	try {
 		const deleteAll = req.body.deleteAll === true;
 		const fileIds = req.body.fileIds;
+		const ownerId = req.body.ownerId;
+		if (!mongoose.isValidObjectId(ownerId)) {
+			return res.status(400).json({ success: false, message: "A valid ownerId is required" });
+		}
+		const owner = await User.findById(ownerId).select("_id");
+		if (!owner) {
+			return res.status(404).json({ success: false, message: "User not found" });
+		}
 		if (!deleteAll && (!Array.isArray(fileIds) || fileIds.length === 0)) {
 			return res.status(400).json({ success: false, message: "Choose files to delete or confirm deleting all files" });
 		}
+		if (!deleteAll && fileIds.some((id) => !mongoose.isValidObjectId(id))) {
+			return res.status(400).json({ success: false, message: "All fileIds must be valid file ids" });
+		}
 
-		const files = await File.find(deleteAll ? {} : { _id: { $in: fileIds } });
+		const uniqueFileIds = [...new Set(fileIds || [])];
+		const filter = deleteAll
+			? { owner: owner._id }
+			: { owner: owner._id, _id: { $in: uniqueFileIds } };
+		const files = await File.find(filter);
+		if (!deleteAll && files.length !== uniqueFileIds.length) {
+			return res.status(403).json({ success: false, message: "One or more selected files do not belong to this user" });
+		}
 		const deletedIds = [];
 		let failedCount = 0;
 		for (const file of files) {
@@ -145,8 +165,24 @@ const deleteFilesBulk = async (req, res, next) => {
 		}
 
 		if (deletedIds.length) {
+			const affectedShares = await FileShare.find({ file: { $in: deletedIds } }).select("file sharedWith");
+			const recipientsByFile = new Map();
+			for (const share of affectedShares) {
+				const fileId = share.file.toString();
+				const recipients = recipientsByFile.get(fileId) || [];
+				recipients.push(share.sharedWith);
+				recipientsByFile.set(fileId, recipients);
+			}
 			await FileShare.deleteMany({ file: { $in: deletedIds } });
 			await File.deleteMany({ _id: { $in: deletedIds } });
+			for (const file of files.filter((item) => deletedIds.some((id) => id.equals(item._id)))) {
+				const payload = { fileId: file._id.toString(), ownerId: owner._id.toString() };
+				getIO().to(`user:${owner._id}`).emit(FILE_DELETED, payload);
+				getIO().to("admin").emit(FILE_DELETED, payload);
+				for (const recipientId of recipientsByFile.get(file._id.toString()) || []) {
+					getIO().to(`user:${recipientId}`).emit(FILE_DELETED, payload);
+				}
+			}
 		}
 
 		return res.json({ success: true, data: { deletedCount: deletedIds.length, failedCount } });

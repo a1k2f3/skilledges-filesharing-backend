@@ -2,7 +2,7 @@ const express = require("express");
 const authenticate = require("../middleware/auth.middleware");
 const requireRole = require("../middleware/role.middleware");
 const { loadFile, requireFileOwner } = require("../middleware/file.middleware");
-const { shareFile, shareFileWithAdmins, shareFileWithTeam, listReceivedShares, listSentShares, revokeShare } = require("../controllers/share.controller");
+const { shareFile, shareFileWithAdmins, shareFileWithTeam, listReceivedShares, listSentShares, markReceivedSharesSeen, deleteReceivedShare, revokeShare } = require("../controllers/share.controller");
 
 const router = express.Router();
 
@@ -11,6 +11,8 @@ router.post("/files/:fileId/admin", requireRole("user", "designer"), loadFile, r
 router.post("/files/:fileId", loadFile, requireFileOwner, shareFile);
 router.post("/files/:fileId/team/:teamId", requireRole("admin"), loadFile, requireFileOwner, shareFileWithTeam);
 router.get("/received", listReceivedShares);
+router.patch("/received/seen", markReceivedSharesSeen);
+router.delete("/received/:shareId", requireRole("designer"), deleteReceivedShare);
 router.get("/sent", listSentShares);
 router.delete("/:shareId", revokeShare);
 

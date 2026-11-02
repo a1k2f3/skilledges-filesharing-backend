@@ -136,7 +136,8 @@ const getCurrentUser = async (req, res, next) => {
 
 const listUsers = async (req, res, next) => {
 	try {
-		const filter = { isActive: true };
+		const includeInactive = req.query.includeInactive === "true";
+		const filter = includeInactive ? {} : { isActive: true };
 		if (req.query.role) filter.role = req.query.role;
 
 		const users = await User.find(filter)

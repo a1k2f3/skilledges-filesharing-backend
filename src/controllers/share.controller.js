@@ -1,8 +1,9 @@
+const mongoose = require("mongoose");
 const FileShare = require("../schema/FileShare");
 const User = require("../schema/User");
 const Team = require("../schema/Team");
 const { getIO } = require("../config/socket");
-const { FILE_SHARED, FILE_SHARE_REVOKED } = require("../constants/events");
+const { FILE_SHARED, FILE_SHARE_SEEN, FILE_SHARE_REVOKED } = require("../constants/events");
 const { createNotification } = require("./notification.controller");
 
 const shareFile = async (req, res, next) => {
@@ -19,7 +20,28 @@ const shareFile = async (req, res, next) => {
 		}
 
 		let share = await FileShare.findOne({ file: req.fileRecord._id, sharedWith: recipient._id });
-		if (share) return res.json({ success: true, data: share });
+		if (share) {
+			if (share.recipientDeletedAt) {
+				share.recipientDeletedAt = null;
+				share.seenAt = null;
+				share.createdAt = new Date();
+				await share.save();
+				await share.populate([
+					{ path: "file", select: "originalName secureUrl" },
+					{ path: "sharedWith", select: "name email" }
+				]);
+				getIO().to(`user:${recipient._id}`).emit(FILE_SHARED, { share });
+				await createNotification({
+					recipient: recipient._id,
+					type: "file-shared",
+					title: "File shared with you",
+					message: `${share.file.originalName} was shared with you again`,
+					data: { shareId: share._id, fileId: share.file._id }
+				});
+				return res.json({ success: true, data: share });
+			}
+			return res.json({ success: true, data: share });
+		}
 
 		const sender = await User.findById(req.user.id).select("name");
 		share = await FileShare.create({
@@ -94,6 +116,7 @@ const listReceivedShares = async (req, res, next) => {
 	try {
 		const shares = await FileShare.find({
 			sharedWith: req.user.id,
+			recipientDeletedAt: null,
 			$or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
 		})
 			.populate("file", "originalName secureUrl size mimeType widthInches heightInches resolutionDpi")
@@ -101,6 +124,30 @@ const listReceivedShares = async (req, res, next) => {
 			.sort({ createdAt: -1 });
 
 		return res.json({ success: true, count: shares.length, data: shares });
+	} catch (error) {
+		next(error);
+	}
+};
+
+const deleteReceivedShare = async (req, res, next) => {
+	try {
+		if (!mongoose.isValidObjectId(req.params.shareId)) {
+			return res.status(400).json({ success: false, message: "A valid share id is required" });
+		}
+		const share = await FileShare.findOneAndUpdate(
+			{ _id: req.params.shareId, sharedWith: req.user.id, recipientDeletedAt: null },
+			{ $set: { recipientDeletedAt: new Date() } },
+			{ new: true }
+		).select("file");
+		if (!share) {
+			return res.status(404).json({ success: false, message: "Received file not found" });
+		}
+
+		getIO().to(`user:${req.user.id}`).emit(FILE_SHARE_REVOKED, {
+			shareId: share._id.toString(),
+			fileId: share.file.toString()
+		});
+		return res.json({ success: true, message: "Received file removed successfully" });
 	} catch (error) {
 		next(error);
 	}
@@ -114,6 +161,41 @@ const listSentShares = async (req, res, next) => {
 			.sort({ createdAt: -1 });
 
 		return res.json({ success: true, count: shares.length, data: shares });
+	} catch (error) {
+		next(error);
+	}
+};
+
+const markReceivedSharesSeen = async (req, res, next) => {
+	try {
+		const { shareIds } = req.body;
+		if (!Array.isArray(shareIds) || shareIds.length === 0 || shareIds.some((id) => !mongoose.isValidObjectId(id))) {
+			return res.status(400).json({ success: false, message: "Valid shareIds are required" });
+		}
+
+		const shares = await FileShare.find({
+			_id: { $in: [...new Set(shareIds)] },
+			sharedWith: req.user.id,
+			seenAt: null,
+			$or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
+		}).select("_id sharedBy");
+		const seenAt = new Date();
+		let updatedCount = 0;
+		for (const share of shares) {
+			const result = await FileShare.updateOne(
+				{ _id: share._id, sharedWith: req.user.id, seenAt: null },
+				{ $set: { seenAt } }
+			);
+			if (result.modifiedCount) {
+				updatedCount += 1;
+				getIO().to(`user:${share.sharedBy}`).emit(FILE_SHARE_SEEN, {
+					shareId: share._id.toString(),
+					seenAt: seenAt.toISOString()
+				});
+			}
+		}
+
+		return res.json({ success: true, data: { updatedCount, seenAt: seenAt.toISOString() } });
 	} catch (error) {
 		next(error);
 	}
@@ -188,4 +270,4 @@ const revokeShare = async (req, res, next) => {
 	}
 };
 
-module.exports = { shareFile, shareFileWithAdmins, shareFileWithTeam, listReceivedShares, listSentShares, revokeShare };
+module.exports = { shareFile, shareFileWithAdmins, shareFileWithTeam, listReceivedShares, listSentShares, markReceivedSharesSeen, deleteReceivedShare, revokeShare };

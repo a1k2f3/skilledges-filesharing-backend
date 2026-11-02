@@ -6,6 +6,8 @@ const fileShareSchema = new mongoose.Schema(
 		sharedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
 		sharedWith: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, index: true },
 		permission: { type: String, enum: ["view", "edit"], default: "view" },
+		seenAt: { type: Date, default: null },
+		recipientDeletedAt: { type: Date, default: null },
 		expiresAt: { type: Date, default: null }
 	},
 	{ timestamps: true }
