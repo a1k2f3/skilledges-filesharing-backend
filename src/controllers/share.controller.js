@@ -6,6 +6,20 @@ const { getIO } = require("../config/socket");
 const { FILE_SHARED, FILE_SHARE_SEEN, FILE_SHARE_REVOKED } = require("../constants/events");
 const { createNotification } = require("./notification.controller");
 
+const isShareActive = (share, now = new Date()) =>
+	!share.recipientDeletedAt && (!share.expiresAt || share.expiresAt > now);
+
+const reopenShare = async (share, sharedBy, permission, expiresAt = null) => {
+	share.sharedBy = sharedBy;
+	share.permission = permission;
+	share.expiresAt = expiresAt;
+	share.recipientDeletedAt = null;
+	share.seenAt = null;
+	share.createdAt = new Date();
+	await share.save();
+	return share;
+};
+
 const shareFile = async (req, res, next) => {
 	try {
 		const { userId, permission, expiresAt } = req.body;
@@ -31,25 +45,24 @@ const shareFile = async (req, res, next) => {
 
 		let share = await FileShare.findOne({ file: req.fileRecord._id, sharedWith: recipient._id });
 		if (share) {
-			if (share.recipientDeletedAt) {
-				share.recipientDeletedAt = null;
-				share.seenAt = null;
-				share.createdAt = new Date();
-				await share.save();
-				await share.populate([
-					{ path: "file", select: "originalName secureUrl" },
-					{ path: "sharedWith", select: "name email" }
-				]);
-				getIO().to(`user:${recipient._id}`).emit(FILE_SHARED, { share });
-				await createNotification({
-					recipient: recipient._id,
-					type: "file-shared",
-					title: "File shared with you",
-					message: `${share.file.originalName} was shared with you again`,
-					data: { shareId: share._id, fileId: share.file._id }
-				});
+			if (isShareActive(share)) {
 				return res.json({ success: true, data: share });
 			}
+
+			await reopenShare(share, req.user.id, permission === "edit" ? "edit" : "view", expiresAt || null);
+			await share.populate([
+				{ path: "file", select: "originalName secureUrl" },
+				{ path: "sharedWith", select: "name email" }
+			]);
+			getIO().to(`user:${recipient._id}`).emit(FILE_SHARED, { share });
+			getIO().to(`user:${req.user.id}`).emit(FILE_SHARED, { share });
+			await createNotification({
+				recipient: recipient._id,
+				type: "file-shared",
+				title: "File shared with you",
+				message: `${share.file.originalName} was shared with you again`,
+				data: { shareId: share._id, fileId: share.file._id }
+			});
 			return res.json({ success: true, data: share });
 		}
 
@@ -93,30 +106,47 @@ const shareFileWithAdmins = async (req, res, next) => {
 		const existingShares = await FileShare.find({
 			file: req.fileRecord._id,
 			sharedWith: { $in: admins.map((admin) => admin._id) }
-		}).select("sharedWith");
-		const existingIds = new Set(existingShares.map((share) => share.sharedWith.toString()));
-		const recipients = admins.filter((admin) => !existingIds.has(admin._id.toString()));
-		if (!recipients.length) {
-			return res.json({ success: true, data: { sharedCount: 0, skippedCount: admins.length } });
-		}
+		});
+		const existingByRecipient = new Map(existingShares.map((share) => [share.sharedWith.toString(), share]));
+		const now = new Date();
+		const recipients = [];
+		const toReactivate = [];
+		let skippedCount = 0;
+		admins.forEach((admin) => {
+			const existing = existingByRecipient.get(admin._id.toString());
+			if (!existing) recipients.push(admin);
+			else if (isShareActive(existing, now)) skippedCount += 1;
+			else toReactivate.push({ admin, share: existing });
+		});
 
-		const shares = await FileShare.insertMany(recipients.map((admin) => ({
+		const reopenedShares = await Promise.all(toReactivate.map(async ({ admin, share }) => ({
+			admin,
+			share: await reopenShare(share, req.user.id, "view")
+		})));
+		const createdShares = recipients.length ? await FileShare.insertMany(recipients.map((admin) => ({
 			file: req.fileRecord._id,
 			sharedBy: req.user.id,
 			sharedWith: admin._id,
 			permission: "view"
-		})));
-		recipients.forEach((admin, index) => {
-			getIO().to(`user:${admin._id}`).emit(FILE_SHARED, { share: shares[index] });
+		}))) : [];
+		const deliveries = [
+			...reopenedShares,
+			...createdShares.map((share, index) => ({ admin: recipients[index], share }))
+		];
+		deliveries.forEach(({ admin, share }) => {
+			getIO().to(`user:${admin._id}`).emit(FILE_SHARED, { share });
 		});
-		await Promise.all(recipients.map((admin, index) => createNotification({
+		await Promise.all(deliveries.map(({ admin, share }) => createNotification({
 			recipient: admin._id,
 			type: "file-shared",
 			title: "New design file received",
 			message: `${req.fileRecord.originalName} was sent by ${sender?.name || "a user"}`,
-			data: { fileId: req.fileRecord._id, shareId: shares[index]._id }
+			data: { fileId: req.fileRecord._id, shareId: share._id }
 		})));
-		return res.status(201).json({ success: true, data: { sharedCount: shares.length, skippedCount: existingIds.size } });
+		return res.status(deliveries.length ? 201 : 200).json({
+			success: true,
+			data: { sharedCount: deliveries.length, skippedCount }
+		});
 	} catch (error) {
 		next(error);
 	}
@@ -131,6 +161,7 @@ const listReceivedShares = async (req, res, next) => {
 		}
 		const shares = await FileShare.find({
 			sharedWith: req.user.id,
+			recipientDeletedAt: null,
 			$or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
 		})
 			.populate("file", "originalName secureUrl size mimeType widthInches heightInches resolutionDpi")
@@ -195,6 +226,7 @@ const markReceivedSharesSeen = async (req, res, next) => {
 		const shares = await FileShare.find({
 			_id: { $in: [...new Set(shareIds)] },
 			sharedWith: req.user.id,
+			recipientDeletedAt: null,
 			seenAt: null,
 			$or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
 		}).select("_id sharedBy");
@@ -202,7 +234,7 @@ const markReceivedSharesSeen = async (req, res, next) => {
 		let updatedCount = 0;
 		for (const share of shares) {
 			const result = await FileShare.updateOne(
-				{ _id: share._id, sharedWith: req.user.id, seenAt: null },
+				{ _id: share._id, sharedWith: req.user.id, recipientDeletedAt: null, seenAt: null },
 				{ $set: { seenAt } }
 			);
 			if (result.modifiedCount) {
@@ -230,29 +262,58 @@ const shareFileWithTeam = async (req, res, next) => {
 		if (!members.length) {
 			return res.status(400).json({ success: false, message: "Add at least one active member to this team before sending a file" });
 		}
-		const existingShares = await FileShare.find({ file: req.fileRecord._id, sharedWith: { $in: members.map((member) => member._id) } }).select("sharedWith");
-		const existingIds = new Set(existingShares.map((share) => share.sharedWith.toString()));
-		const recipients = members.filter((member) => !existingIds.has(member._id.toString()));
+		const existingShares = await FileShare.find({
+			file: req.fileRecord._id,
+			sharedWith: { $in: members.map((member) => member._id) }
+		});
+		const existingByRecipient = new Map(existingShares.map((share) => [share.sharedWith.toString(), share]));
+		const now = new Date();
+		const recipients = [];
+		const toReactivate = [];
+		let skippedCount = 0;
+		members.forEach((member) => {
+			const existing = existingByRecipient.get(member._id.toString());
+			if (!existing) recipients.push(member);
+			else if (isShareActive(existing, now)) skippedCount += 1;
+			else toReactivate.push({ member, share: existing });
+		});
 
-		const shares = await FileShare.insertMany(recipients.map((member) => ({
+		const permission = req.body.permission === "edit" ? "edit" : "view";
+		const expiresAt = req.body.expiresAt || null;
+		const reopenedShares = await Promise.all(toReactivate.map(async ({ member, share }) => ({
+			member,
+			share: await reopenShare(share, req.user.id, permission, expiresAt)
+		})));
+		const createdShares = recipients.length ? await FileShare.insertMany(recipients.map((member) => ({
 			file: req.fileRecord._id,
 			sharedBy: req.user.id,
 			sharedWith: member._id,
-			permission: req.body.permission === "edit" ? "edit" : "view",
-			expiresAt: req.body.expiresAt || null
-		})));
-		recipients.forEach((member, index) => {
-			getIO().to(`user:${member._id}`).emit(FILE_SHARED, { share: shares[index], teamId: team._id });
+			permission,
+			expiresAt
+		}))) : [];
+		const deliveries = [
+			...reopenedShares,
+			...createdShares.map((share, index) => ({ member: recipients[index], share }))
+		];
+		deliveries.forEach(({ member, share }) => {
+			getIO().to(`user:${member._id}`).emit(FILE_SHARED, { share, teamId: team._id });
 		});
-		getIO().to(`user:${req.user.id}`).emit(FILE_SHARED, { teamId: team._id, fileId: req.fileRecord._id, sharedCount: shares.length });
-		await Promise.all(recipients.map((member) => createNotification({
+		getIO().to(`user:${req.user.id}`).emit(FILE_SHARED, {
+			teamId: team._id,
+			fileId: req.fileRecord._id,
+			sharedCount: deliveries.length
+		});
+		await Promise.all(deliveries.map(({ member }) => createNotification({
 			recipient: member._id,
 			type: "file-shared",
 			title: "File shared with your team",
 			message: `${req.fileRecord.originalName} was shared with ${team.name}`,
 			data: { fileId: req.fileRecord._id, teamId: team._id }
 		})));
-		return res.status(201).json({ success: true, data: { teamId: team._id, teamName: team.name, sharedCount: shares.length, skippedCount: members.length - recipients.length } });
+		return res.status(deliveries.length ? 201 : 200).json({
+			success: true,
+			data: { teamId: team._id, teamName: team.name, sharedCount: deliveries.length, skippedCount }
+		});
 	} catch (error) {
 		next(error);
 	}

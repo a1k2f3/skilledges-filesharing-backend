@@ -95,6 +95,7 @@ const downloadFile = async (req, res, next) => {
 		const hasShare = await FileShare.exists({
 			file: req.fileRecord._id,
 			sharedWith: req.user.id,
+			recipientDeletedAt: null,
 			$or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }]
 		});
 		if (!isOwner && !isAdmin && !hasShare) {
